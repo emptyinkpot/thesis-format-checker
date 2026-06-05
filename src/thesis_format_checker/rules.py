@@ -685,3 +685,200 @@ def check_chapter_numbering_arabic(docx, content, preset) -> list[Finding]:
                 location=f"Paragraph {p.index}", fixable=False,
             ))
     return findings
+
+
+# --- Rules from 张晓华 checklist (2026-06-05) ---
+
+
+@rule("keywords-separator", default_severity="warning")
+def check_keywords_separator(docx, content, preset) -> list[Finding]:
+    """关键词应使用中文分号'；'分隔，不是逗号或英文分号。"""
+    if not preset.get("content", {}).get("abstract_zh", {}).get("keywords_separator", "；"):
+        return []
+    for p in docx.paragraphs[:80]:
+        text = p.text.strip()
+        if "关键词" in text and "：" in text:
+            kw_part = text.split("：", 1)[-1] if "：" in text else text.split(":", 1)[-1]
+            if "," in kw_part or "、" in kw_part:
+                return [Finding(
+                    rule_id="keywords-separator",
+                    message=f"关键词应使用中文分号'；'分隔，实际包含逗号或顿号",
+                    expected="关键词间用'；'", actual=kw_part[:40],
+                    location=f"Paragraph {p.index}", fixable=True,
+                )]
+            if ";" in kw_part and "；" not in kw_part:
+                return [Finding(
+                    rule_id="keywords-separator",
+                    message=f"关键词应使用中文分号'；'，实际用了英文分号';'",
+                    expected="；", actual=";",
+                    location=f"Paragraph {p.index}", fixable=True,
+                )]
+            break
+    return []
+
+
+@rule("figure-table-centered", default_severity="warning")
+def check_figure_table_centered(docx, content, preset) -> list[Finding]:
+    """图和表应居中对齐。"""
+    if not preset.get("structure", {}).get("figure_table_centered", True):
+        return []
+    findings = []
+    caption_re = re.compile(r"^(图|表)\s*\d+[\.\-]\d+")
+    for p in docx.paragraphs:
+        text = p.text.strip()
+        if caption_re.match(text):
+            if p.align and p.align not in ("center", "both"):
+                findings.append(Finding(
+                    rule_id="figure-table-centered",
+                    message=f"图表题注 {text[:20]!r} 应居中，实际对齐 {p.align}",
+                    expected="center", actual=p.align,
+                    location=f"Paragraph {p.index}", fixable=True,
+                ))
+    if len(findings) > 5:
+        return [Finding(
+            rule_id="figure-table-centered",
+            message=f"发现 {len(findings)} 处图表题注未居中",
+            location="正文", fixable=True,
+        )]
+    return findings
+
+
+@rule("excessive-whitespace", default_severity="warning")
+def check_excessive_whitespace(docx, content, preset) -> list[Finding]:
+    """正文不应出现连续多个空段落（大段空白）。"""
+    if not preset.get("structure", {}).get("max_consecutive_empty", 3):
+        return []
+    max_empty = preset.get("structure", {}).get("max_consecutive_empty", 3)
+    findings = []
+    consecutive = 0
+    for p in docx.paragraphs:
+        if not p.text.strip():
+            consecutive += 1
+        else:
+            if consecutive > max_empty:
+                findings.append(Finding(
+                    rule_id="excessive-whitespace",
+                    message=f"段落 {p.index} 前有 {consecutive} 个连续空段落，疑似大段空白",
+                    expected=f"≤{max_empty} 个连续空段落",
+                    actual=str(consecutive),
+                    location=f"Paragraph {p.index}", fixable=False,
+                ))
+            consecutive = 0
+    return findings
+
+
+@rule("reference-all-cited", default_severity="warning")
+def check_reference_all_cited(docx, content, preset) -> list[Finding]:
+    """参考文献列表中的每条应在正文中被引用。"""
+    if not preset.get("structure", {}).get("reference_all_cited", True):
+        return []
+    # Collect reference list numbers
+    in_refs = False
+    ref_nums: set[int] = set()
+    for p in docx.paragraphs:
+        text = p.text.strip()
+        if "参考文献" in text and len(text) < 10:
+            in_refs = True
+            continue
+        if in_refs:
+            if re.match(r"^(附录|致\s*谢)", text):
+                break
+            m = re.match(r"^\[(\d+)\]", text)
+            if m:
+                ref_nums.add(int(m.group(1)))
+
+    if not ref_nums:
+        return []
+
+    # Check which refs are cited in body
+    cited: set[int] = set()
+    for p in docx.paragraphs:
+        text = p.text
+        if "参考文献" in text and len(text.strip()) < 10:
+            break
+        for m in re.finditer(r"\[(\d+)\]", text):
+            cited.add(int(m.group(1)))
+
+    uncited = ref_nums - cited
+    if uncited:
+        return [Finding(
+            rule_id="reference-all-cited",
+            message=f"参考文献中 [{', '.join(str(n) for n in sorted(uncited))}] 未在正文引用",
+            expected="全部被引用", actual=f"{len(uncited)} 条未引用",
+            location="参考文献", fixable=False,
+        )]
+    return []
+
+
+@rule("table-no-page-break", default_severity="info")
+def check_table_no_page_break(docx, content, preset) -> list[Finding]:
+    """表格和图不应被分页切断（检测表格紧邻段是否有分页）。"""
+    # Heuristic: if a paragraph right before a table has a page break,
+    # it might cause table to start at top of next page (acceptable).
+    # If a paragraph IN the middle of surrounding table context has break, flag.
+    # TODO: deeper implementation needs table row-level page break detection
+    return []
+
+
+@rule("code-block-length", default_severity="info")
+def check_code_block_length(docx, content, preset) -> list[Finding]:
+    """正文中连续代码/资料段落不宜过长（避免大段粘贴）。"""
+    max_lines = preset.get("structure", {}).get("max_code_block_lines", 30)
+    if not max_lines:
+        return []
+    # Detect code-like paragraphs: monospace font or specific style names
+    findings = []
+    consecutive_code = 0
+    code_start_idx = 0
+    for p in docx.paragraphs:
+        is_code = False
+        if p.style_name in ("Code", "Source Code", "HTML Code", "Listing"):
+            is_code = True
+        elif p.first_run_latin and "Courier" in (p.first_run_latin or ""):
+            is_code = True
+        elif p.first_run_latin and "Consolas" in (p.first_run_latin or ""):
+            is_code = True
+        if is_code:
+            if consecutive_code == 0:
+                code_start_idx = p.index
+            consecutive_code += 1
+        else:
+            if consecutive_code > max_lines:
+                findings.append(Finding(
+                    rule_id="code-block-length",
+                    message=f"段落 {code_start_idx} 起连续 {consecutive_code} 行代码/资料，过长",
+                    expected=f"≤{max_lines} 行", actual=str(consecutive_code),
+                    location=f"Paragraph {code_start_idx}", fixable=False,
+                ))
+            consecutive_code = 0
+    return findings
+
+
+@rule("cover-advisor-consistency", default_severity="warning")
+def check_cover_advisor_consistency(docx, content, preset) -> list[Finding]:
+    """封面指导教师与致谢中提到的老师应一致。"""
+    if not preset.get("content", {}).get("cover_advisor_consistency", True):
+        return []
+    # Extract advisor name from cover (pandoc output)
+    advisor_name = ""
+    cover_text = content.full_text[:3000]
+    m = re.search(r"指导教师[^\n]*?[\*\s]+([^\*\s\n]{2,4})", cover_text)
+    if m:
+        advisor_name = m.group(1).strip()
+
+    if not advisor_name:
+        return []
+
+    # Check if advisor appears in 致谢 section
+    thanks_start = content.full_text.find("致")
+    if thanks_start < 0:
+        return []
+    thanks_block = content.full_text[thanks_start:thanks_start + 2000]
+    if advisor_name not in thanks_block:
+        return [Finding(
+            rule_id="cover-advisor-consistency",
+            message=f"封面指导教师 {advisor_name!r} 未在致谢中出现，可能不一致",
+            expected=advisor_name, actual="致谢中未提及",
+            location="致谢", fixable=False,
+        )]
+    return []

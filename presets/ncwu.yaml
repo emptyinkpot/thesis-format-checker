@@ -80,10 +80,14 @@ structure:
   chapter_numbering_arabic: true
   reference_superscript: true
   reference_gbt7714: true
+  reference_all_cited: true
   table_three_line: true
   figure_caption_below: true
   table_caption_above: true
+  figure_table_centered: true
   figure_table_numbering: chapter_dot
+  max_consecutive_empty: 3
+  max_code_block_lines: 30
 
 # 规则开关：可单独 enable/disable + 调严重度
 # severity: error | warning | info
@@ -189,4 +193,25 @@ rules:
     enabled: true
   - id: reference-format
     severity: info
+    enabled: true
+  - id: keywords-separator
+    severity: warning
+    enabled: true
+  - id: figure-table-centered
+    severity: warning
+    enabled: true
+  - id: excessive-whitespace
+    severity: warning
+    enabled: true
+  - id: reference-all-cited
+    severity: warning
+    enabled: true
+  - id: table-no-page-break
+    severity: info
+    enabled: true
+  - id: code-block-length
+    severity: info
+    enabled: true
+  - id: cover-advisor-consistency
+    severity: warning
     enabled: true
