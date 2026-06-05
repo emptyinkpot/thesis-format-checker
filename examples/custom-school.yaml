@@ -1,0 +1,69 @@
+# 示例：自定义学校规则集
+# 把这个文件改成你自己学校的规则，然后用 --rules 加载
+#
+# thesis-check check 论文.docx --rules examples/custom-school.yaml
+
+name: "示例大学本科毕业论文格式"
+preset_id: example
+version: "0.1"
+
+page:
+  size: A4
+  margin_cm:
+    top: 2.5
+    bottom: 2.5
+    left: 2.8
+    right: 2.5
+  header_text: "示例大学毕业论文"
+  header_font:
+    east_asia: 宋体
+    size_pt: 9
+    align: center
+
+styles:
+  body:
+    east_asia: 宋体
+    latin: Times New Roman
+    size_pt: 12
+    line_spacing: 1.5
+    first_line_indent_chars: 2
+  heading1:
+    east_asia: 黑体
+    size_pt: 16
+    bold: true
+    align: center
+    page_break_before: true
+  heading2:
+    east_asia: 黑体
+    size_pt: 14
+    bold: true
+    align: left
+  heading3:
+    east_asia: 黑体
+    size_pt: 12
+    bold: true
+    align: left
+
+content:
+  abstract_zh:
+    min_chars: 300
+  abstract_en:
+    min_words: 200
+  foreign_translation:
+    min_chars: 1500
+  toc:
+    required: true
+    max_depth: 3
+  cover_fields:
+    required: ["学院", "专业", "姓名", "学号"]
+
+structure:
+  chapter_page_break: true
+
+# 关闭你不在乎的规则，或调低严重度
+rules:
+  - id: foreign-translation-length
+    severity: warning   # 降级为 warning
+    enabled: true
+  - id: header-on-all-sections
+    enabled: false       # 完全关掉

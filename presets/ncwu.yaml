@@ -1,0 +1,120 @@
+# 华北水利水电大学本科毕业设计（论文）格式规则
+# 来源: 学校官方《华北水利水电大学本科毕业设计（论文）格式和要求》
+# 维护者: emptyinkpot
+
+name: 华北水利水电大学本科毕业设计论文
+preset_id: ncwu
+version: "2026.06"
+
+page:
+  size: A4
+  margin_cm:
+    top: 2.5
+    bottom: 2.5
+    left: 3.0
+    right: 2.5
+  header_text: "华北水利水电大学毕业设计（论文）"
+  header_font:
+    east_asia: 宋体
+    size_pt: 9
+    align: center
+
+styles:
+  body:
+    east_asia: 宋体
+    latin: Times New Roman
+    size_pt: 12
+    line_spacing: 1.5
+    first_line_indent_chars: 2
+  heading1:
+    east_asia: 黑体
+    size_pt: 16
+    bold: true
+    align: center
+    page_break_before: true
+  heading2:
+    east_asia: 黑体
+    size_pt: 14
+    bold: true
+    align: left
+  heading3:
+    east_asia: 黑体
+    size_pt: 12
+    bold: true
+    align: left
+  caption:
+    east_asia: 宋体
+    size_pt: 10.5
+    align: center
+
+content:
+  abstract_zh:
+    min_chars: 500
+    must_contain: ["关键词"]
+  abstract_en:
+    min_words: 300
+    must_contain: ["Key Words", "ABSTRACT"]
+  foreign_translation:
+    min_chars: 2000
+  toc:
+    required: true
+    max_depth: 3
+  cover_fields:
+    required: ["学院", "专业", "姓名", "学号", "指导教师", "完成时间"]
+
+structure:
+  chapter_page_break: true
+  reference_superscript: true
+  table_three_line: true
+
+# 规则开关：可单独 enable/disable + 调严重度
+# severity: error | warning | info
+rules:
+  - id: page-margins
+    severity: error
+    enabled: true
+  - id: header-text-match
+    severity: warning
+    enabled: true
+  - id: header-on-all-sections
+    severity: warning
+    enabled: true
+  - id: body-font-size
+    severity: error
+    enabled: true
+  - id: body-east-asia-font
+    severity: error
+    enabled: true
+  - id: body-line-spacing
+    severity: warning
+    enabled: true
+  - id: heading1-style
+    severity: error
+    enabled: true
+  - id: heading2-style
+    severity: error
+    enabled: true
+  - id: heading3-style
+    severity: warning
+    enabled: true
+  - id: heading-style-applied
+    severity: error
+    enabled: true
+  - id: chapter-page-break
+    severity: warning
+    enabled: true
+  - id: abstract-zh-length
+    severity: error
+    enabled: true
+  - id: abstract-en-length
+    severity: warning
+    enabled: true
+  - id: foreign-translation-length
+    severity: error
+    enabled: true
+  - id: toc-present
+    severity: error
+    enabled: true
+  - id: cover-fields
+    severity: error
+    enabled: true

@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "thesis-format-checker"
+version = "0.1.0"
+description = "DOCX thesis format compliance checker with rule presets and auto-fix"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "emptyinkpot" }]
+keywords = ["docx", "thesis", "format", "lint", "checker"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Office/Business",
+    "Topic :: Text Processing",
+]
+dependencies = [
+    "python-docx>=1.0",
+    "click>=8.1",
+    "pyyaml>=6.0",
+    "rich>=13.0",
+    "lxml>=4.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff>=0.1"]
+
+[project.scripts]
+thesis-check = "thesis_format_checker.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/emptyinkpot/thesis-format-checker"
+Issues = "https://github.com/emptyinkpot/thesis-format-checker/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/thesis_format_checker"]
+
+[tool.hatch.build]
+include = ["src/thesis_format_checker/**/*.py", "presets/*.yaml"]
