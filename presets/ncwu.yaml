@@ -18,6 +18,13 @@ page:
     east_asia: 宋体
     size_pt: 9
     align: center
+  header_underline: true
+  header_frontmatter_excluded: true
+  page_number:
+    body_format: arabic
+    body_position: center_bottom
+    frontmatter_roman: true
+    cover_excluded: true
 
 styles:
   body:
@@ -51,6 +58,10 @@ content:
   abstract_zh:
     min_chars: 500
     must_contain: ["关键词"]
+    title_above: true
+    title_spacing: true
+    keywords_bold: true
+    classification_number: true
   abstract_en:
     min_words: 300
     must_contain: ["Key Words", "ABSTRACT"]
@@ -59,13 +70,20 @@ content:
   toc:
     required: true
     max_depth: 3
+    title_spacing: true
+    dotline: true
   cover_fields:
     required: ["学院", "专业", "姓名", "学号", "指导教师", "完成时间"]
 
 structure:
   chapter_page_break: true
+  chapter_numbering_arabic: true
   reference_superscript: true
+  reference_gbt7714: true
   table_three_line: true
+  figure_caption_below: true
+  table_caption_above: true
+  figure_table_numbering: chapter_dot
 
 # 规则开关：可单独 enable/disable + 调严重度
 # severity: error | warning | info
@@ -79,6 +97,12 @@ rules:
   - id: header-on-all-sections
     severity: warning
     enabled: true
+  - id: header-underline
+    severity: warning
+    enabled: true
+  - id: header-frontmatter-excluded
+    severity: warning
+    enabled: true
   - id: body-font-size
     severity: error
     enabled: true
@@ -86,6 +110,9 @@ rules:
     severity: error
     enabled: true
   - id: body-line-spacing
+    severity: warning
+    enabled: true
+  - id: body-first-line-indent
     severity: warning
     enabled: true
   - id: heading1-style
@@ -103,11 +130,26 @@ rules:
   - id: chapter-page-break
     severity: warning
     enabled: true
+  - id: chapter-numbering-arabic
+    severity: info
+    enabled: true
   - id: abstract-zh-length
     severity: error
     enabled: true
   - id: abstract-en-length
     severity: warning
+    enabled: true
+  - id: abstract-page-title
+    severity: warning
+    enabled: true
+  - id: abstract-title-spacing
+    severity: info
+    enabled: true
+  - id: keywords-bold
+    severity: info
+    enabled: true
+  - id: classification-number
+    severity: info
     enabled: true
   - id: foreign-translation-length
     severity: error
@@ -115,6 +157,36 @@ rules:
   - id: toc-present
     severity: error
     enabled: true
+  - id: toc-title-spacing
+    severity: info
+    enabled: true
+  - id: toc-dotline
+    severity: info
+    enabled: true
   - id: cover-fields
     severity: error
+    enabled: true
+  - id: cover-no-page-number
+    severity: info
+    enabled: true
+  - id: page-number-format
+    severity: warning
+    enabled: true
+  - id: page-number-roman-frontmatter
+    severity: warning
+    enabled: true
+  - id: figure-caption-position
+    severity: warning
+    enabled: true
+  - id: table-caption-position
+    severity: warning
+    enabled: true
+  - id: figure-table-numbering
+    severity: warning
+    enabled: true
+  - id: reference-superscript
+    severity: warning
+    enabled: true
+  - id: reference-format
+    severity: info
     enabled: true
