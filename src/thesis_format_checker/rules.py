@@ -110,7 +110,14 @@ def check_header_on_all_sections(docx, content, preset) -> list[Finding]:
     has_any_header = any(s.header_text for s in docx.sections)
     if not has_any_header:
         return findings
+    # NCWU template only requires the body text to carry the thesis header.
+    # Front matter sections such as cover, declarations, TOC and abstracts are
+    # intentionally headerless, so only require headers from the first section
+    # that already has a body header onward.
+    first_header_idx = next((s.index for s in docx.sections if s.header_text), 0)
     for sec in docx.sections:
+        if sec.index < first_header_idx:
+            continue
         if not sec.header_text and not sec.header_linked_to_previous:
             findings.append(Finding(
                 rule_id="header-on-all-sections",
@@ -342,12 +349,21 @@ def check_cover_fields(docx, content, preset) -> list[Finding]:
     required = preset.get("content", {}).get("cover_fields", {}).get("required", [])
     if not required:
         return []
-    missing = [f for f in required if f not in content.cover_fields_found]
+    found = set(content.cover_fields_found)
+    # Pandoc can split cover table labels and values, but the raw full text still
+    # contains the labels. Accept labels that appear in the first page/front
+    # matter text so table-based school covers are not false failures.
+    cover_text = content.full_text[:3000]
+    compact_cover_text = re.sub(r"\s+", "", cover_text)
+    for field in required:
+        if field in cover_text or field in compact_cover_text:
+            found.add(field)
+    missing = [f for f in required if f not in found]
     if missing:
         return [Finding(
             rule_id="cover-fields",
             message=f"封面缺少字段: {'、'.join(missing)}",
-            expected=required, actual=content.cover_fields_found,
+            expected=required, actual=sorted(found),
             location="封面", fixable=False,
         )]
     return []
@@ -751,11 +767,15 @@ def check_excessive_whitespace(docx, content, preset) -> list[Finding]:
     max_empty = preset.get("structure", {}).get("max_consecutive_empty", 3)
     findings = []
     consecutive = 0
+    in_body = False
     for p in docx.paragraphs:
+        text = p.text.strip()
+        if re.match(r"^第\d+章", text):
+            in_body = True
         if not p.text.strip():
             consecutive += 1
         else:
-            if consecutive > max_empty:
+            if in_body and consecutive > max_empty:
                 findings.append(Finding(
                     rule_id="excessive-whitespace",
                     message=f"段落 {p.index} 前有 {consecutive} 个连续空段落，疑似大段空白",
@@ -865,12 +885,19 @@ def check_cover_advisor_consistency(docx, content, preset) -> list[Finding]:
     m = re.search(r"指导教师[^\n]*?[\*\s]+([^\*\s\n]{2,4})", cover_text)
     if m:
         advisor_name = m.group(1).strip()
+    if not advisor_name:
+        # Fallback for table-based school covers in plain extracted text.
+        m = re.search(r"指导教师\s*([^\s\n]{2,4})", cover_text)
+        if m:
+            advisor_name = m.group(1).strip()
 
     if not advisor_name:
         return []
 
     # Check if advisor appears in 致谢 section
-    thanks_start = content.full_text.find("致")
+    thanks_start = content.full_text.find("致谢")
+    if thanks_start < 0:
+        thanks_start = content.full_text.find("致  谢")
     if thanks_start < 0:
         return []
     thanks_block = content.full_text[thanks_start:thanks_start + 2000]

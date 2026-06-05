@@ -218,7 +218,7 @@ def _extract_paragraphs(doc) -> list[ParagraphInfo]:
             if ea is None:
                 rpr = run._r.find(qn("w:rPr"))
                 ea, latin, size_pt, bold = _extract_font_from_rpr(rpr)
-                if ea is not None or size_pt is not None:
+                if ea is not None or latin is not None or size_pt is not None or bold is not None:
                     break
         paragraphs.append(ParagraphInfo(
             index=i,
