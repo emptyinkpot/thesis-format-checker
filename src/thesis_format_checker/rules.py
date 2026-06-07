@@ -164,6 +164,44 @@ def check_body_east_asia_font(docx, content, preset) -> list[Finding]:
     return []
 
 
+@rule("text-color-consistency", default_severity="warning")
+def check_text_color_consistency(docx, content, preset) -> list[Finding]:
+    """Visible thesis text should not inherit colored styles or direct colors."""
+    non_black_styles = []
+    for name, style in docx.styles.items():
+        color = getattr(style, "color", None)
+        theme_color = getattr(style, "theme_color", None)
+        if theme_color or (color is not None and str(color).lower() not in {"000000", "auto"}):
+            non_black_styles.append((name, color, theme_color))
+
+    non_black_runs = getattr(docx, "non_black_runs", [])
+    if not non_black_styles and not non_black_runs:
+        return []
+
+    style_preview = ", ".join(
+        f"{name}={color or ''}/{theme or ''}"
+        for name, color, theme in non_black_styles[:8]
+    )
+    run_preview = "; ".join(
+        f"{item.source}: {item.text}"
+        for item in non_black_runs[:3]
+    )
+    detail = []
+    if non_black_styles:
+        detail.append(f"非黑色样式 {len(non_black_styles)} 个: {style_preview}")
+    if non_black_runs:
+        detail.append(f"非黑色直接 run {len(non_black_runs)} 个: {run_preview}")
+
+    return [Finding(
+        rule_id="text-color-consistency",
+        message="正文可见文字颜色应统一为黑色；" + "；".join(detail),
+        expected="#000000",
+        actual={"styles": len(non_black_styles), "runs": len(non_black_runs)},
+        location="styles.xml / document.xml",
+        fixable=True,
+    )]
+
+
 @rule("body-line-spacing", default_severity="warning")
 def check_body_line_spacing(docx, content, preset) -> list[Finding]:
     expected = preset.get("styles", {}).get("body", {}).get("line_spacing")
@@ -629,8 +667,10 @@ def check_reference_superscript(docx, content, preset) -> list[Finding]:
         if text.startswith("[") and re.match(r"^\[\d+\]", text):
             continue
         matches = inline_ref_re.findall(text)
-        if matches and p.first_run_size_pt and p.first_run_size_pt >= 10:
-            # References in normal-sized text = likely not superscript
+        if not matches:
+            continue
+
+        if getattr(p, "inline_ref_not_superscript_count", 0) > 0:
             non_super_refs.append((p.index, text[:40]))
     if len(non_super_refs) > 3:
         return [Finding(

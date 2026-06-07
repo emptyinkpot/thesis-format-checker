@@ -113,6 +113,9 @@ rules:
   - id: body-east-asia-font
     severity: error
     enabled: true
+  - id: text-color-consistency
+    severity: warning
+    enabled: true
   - id: body-line-spacing
     severity: warning
     enabled: true

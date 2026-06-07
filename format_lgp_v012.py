@@ -1,0 +1,459 @@
+"""Generate Liu Gaopeng thesis v012 with visual-format normalization.
+
+Input is the last structurally safe delivery candidate, v011. This script keeps
+the document content chain intact, then fixes visual inconsistencies that the
+school-rule checker does not fully cover:
+
+- style-level colors such as Hyperlink and Pandoc token styles
+- direct run colors
+- body / heading / caption / TOC base fonts
+- several short bridge paragraphs for obvious page-rhythm gaps
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import shutil
+import subprocess
+from pathlib import Path
+from zipfile import ZipFile, ZIP_DEFLATED
+
+from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Pt, RGBColor
+from lxml import etree
+
+
+DOWNLOADS = Path(r"C:/Users/ASUS-KL/Downloads")
+SRC = DOWNLOADS / "202213210刘高朋修改迭代版_v011_格式统一交付版.docx"
+OUT = DOWNLOADS / "202213210刘高朋修改迭代版_v012_全篇黑色字体统一版.docx"
+PDF = OUT.with_suffix(".pdf")
+REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v012_格式检测报告.md"
+BLANK_REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v012_留白扫描.json"
+PAGE_DIR = DOWNLOADS / "202213210刘高朋修改迭代版_v012_pdf_pages"
+VERSION_LOG = DOWNLOADS / "202213210刘高朋修改迭代版_版本记录.md"
+
+W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+NS = {"w": W_NS}
+
+
+BRIDGE_PARAGRAPHS = {
+    "从实现角度看，SCD41负责CO2": [
+        "因此，第2章在结构上承担了承前启后的作用：它把第1章提出的监测需求转化为可以落地的模块分工，也为后续硬件接口、程序流程、功能页面和测试项目提供了同一套解释框架。这样安排后，后文各章不再是分散介绍，而是围绕同一条数据链路逐步展开。"
+    ],
+    "主循环以timeCount作为节拍变量。": [
+        "在实际运行中，主循环并不是把所有任务同时处理，而是按“采集—判断—显示—上传”的顺序逐项完成。这样可以保证CO2数据先经过校验和报警等级计算，再进入OLED显示和远程数据帧；如果Wi-Fi或MQTT暂时异常，程序只记录网络状态，不回退采集和本地预警流程。",
+        "这种调度方式也便于后续测试定位问题。采集异常时可优先检查SCD41总线和CRC校验，报警异常时可检查CalcAlarmLevel和AlarmOutput，上传异常时再检查ESP8266和OneNET连接。图4.1正是按照这个排查顺序组织程序流程。"
+    ],
+    "从论文结构看，第6章的测试内容与前文设计内容逐项对应": [
+        "因此，第6章的意义不只是列出测试结果，而是用测试记录把前文的设计链路重新闭合。采集、报警、显示、上传和移动端查看分别对应不同测试项目，任何一项异常都能追溯到具体硬件接口或程序模块，这也为后续优化提供了明确入口。"
+    ],
+}
+
+
+def normalize_text(text: str) -> str:
+    return re.sub(r"\s+", "", text or "")
+
+
+def ensure_child(parent, tag: str):
+    child = parent.find(qn(tag))
+    if child is None:
+        child = OxmlElement(tag)
+        parent.append(child)
+    return child
+
+
+def set_xml_color_black(rpr) -> None:
+    color = ensure_child(rpr, "w:color")
+    color.set(qn("w:val"), "000000")
+    for attr in ("w:themeColor", "w:themeTint", "w:themeShade"):
+        color.attrib.pop(qn(attr), None)
+
+
+def set_xml_fonts(rpr, east_asia: str, latin: str) -> None:
+    fonts = ensure_child(rpr, "w:rFonts")
+    fonts.set(qn("w:eastAsia"), east_asia)
+    fonts.set(qn("w:ascii"), latin)
+    fonts.set(qn("w:hAnsi"), latin)
+    fonts.set(qn("w:cs"), latin)
+
+
+def set_xml_size(rpr, size_pt: float) -> None:
+    half_points = str(int(round(size_pt * 2)))
+    for tag in ("w:sz", "w:szCs"):
+        elem = ensure_child(rpr, tag)
+        elem.set(qn("w:val"), half_points)
+
+
+def set_run_visual(run, east_asia: str, latin: str, size_pt: float | None, bold: bool | None = None) -> None:
+    rpr = run._element.get_or_add_rPr()
+    set_xml_color_black(rpr)
+    set_xml_fonts(rpr, east_asia, latin)
+    if size_pt is not None:
+        set_xml_size(rpr, size_pt)
+    if bold is not None:
+        run.bold = bold
+    run.font.color.rgb = RGBColor(0, 0, 0)
+
+
+def is_inline_citation_run(run) -> bool:
+    text = run.text or ""
+    if not re.fullmatch(r"\s*(\[\d+\]\s*)+", text):
+        return False
+    rpr = run._element.find(qn("w:rPr"))
+    if rpr is None:
+        return False
+    vert = rpr.find(qn("w:vertAlign"))
+    return vert is not None and vert.get(qn("w:val")) == "superscript"
+
+
+def paragraph_kind(paragraph) -> tuple[str, str, float, bool | None]:
+    style = paragraph.style.name if paragraph.style is not None else ""
+    text = paragraph.text.strip()
+    first_font = paragraph.runs[0].font.name if paragraph.runs else ""
+    code_like = (
+        style in {"Code", "Source Code", "HTML Code", "Listing"}
+        or first_font in {"Consolas", "Courier New", "Courier"}
+        or bool(re.match(r"^\d{4}\s+", text))
+    )
+    if code_like:
+        return "Consolas", "Consolas", 10.5, None
+    if re.match(r"^\[\d+\]", text):
+        return "宋体", "Times New Roman", 10.5, None
+    if style == "Heading 1":
+        return "黑体", "Times New Roman", 16, None
+    if style == "Heading 2":
+        return "黑体", "Times New Roman", 14, None
+    if style == "Heading 3":
+        return "黑体", "Times New Roman", 12, None
+    if style.lower().startswith("toc"):
+        return "宋体", "Times New Roman", 12, None
+    if style == "caption" or text.startswith(("图", "表")):
+        return "宋体", "Times New Roman", 10.5, None
+    return "宋体", "Times New Roman", 12, None
+
+
+def tighten_reference_paragraph(paragraph) -> None:
+    text = paragraph.text.strip()
+    if not re.match(r"^\[\d+\]", text):
+        return
+    fmt = paragraph.paragraph_format
+    fmt.space_before = Pt(0)
+    fmt.space_after = Pt(0)
+    fmt.line_spacing = 0.92
+    fmt.first_line_indent = None
+
+
+def make_body_paragraph(doc: Document, text: str) -> OxmlElement:
+    para = OxmlElement("w:p")
+    ppr = OxmlElement("w:pPr")
+    if "Body Text" in doc.styles:
+        pstyle = OxmlElement("w:pStyle")
+        pstyle.set(qn("w:val"), doc.styles["Body Text"].style_id)
+        ppr.append(pstyle)
+    para.append(ppr)
+    run = OxmlElement("w:r")
+    rpr = OxmlElement("w:rPr")
+    set_xml_color_black(rpr)
+    set_xml_fonts(rpr, "宋体", "Times New Roman")
+    set_xml_size(rpr, 12)
+    run.append(rpr)
+    t = OxmlElement("w:t")
+    t.set(qn("xml:space"), "preserve")
+    t.text = text
+    run.append(t)
+    para.append(run)
+    return para
+
+
+def paragraph_contains_after(paragraph, prefix: str) -> bool:
+    text = paragraph.text.strip()
+    return text.startswith(prefix) or normalize_text(text).startswith(normalize_text(prefix))
+
+
+def insert_bridge_paragraphs(doc: Document) -> None:
+    for anchor, texts in BRIDGE_PARAGRAPHS.items():
+        for paragraph in doc.paragraphs:
+            if paragraph_contains_after(paragraph, anchor):
+                existing_after = "\n".join(p.text for p in doc.paragraphs)
+                if all(text in existing_after for text in texts):
+                    break
+                current = paragraph._element
+                for text in texts:
+                    new_para = make_body_paragraph(doc, text)
+                    current.addnext(new_para)
+                    current = new_para
+                break
+        else:
+            raise RuntimeError(f"找不到插入锚点: {anchor}")
+
+
+def normalize_docx_with_python_docx() -> None:
+    shutil.copy2(SRC, OUT)
+    doc = Document(str(OUT))
+
+    insert_bridge_paragraphs(doc)
+
+    for style in doc.styles:
+        if not hasattr(style, "font"):
+            continue
+        try:
+            style.font.color.rgb = RGBColor(0, 0, 0)
+            if style.name == "Hyperlink":
+                style.font.underline = False
+        except Exception:
+            pass
+
+    for section in doc.sections:
+        for container in (section.header, section.footer):
+            for paragraph in container.paragraphs:
+                for run in paragraph.runs:
+                    set_run_visual(run, "宋体", "Times New Roman", 9)
+
+    for paragraph in doc.paragraphs:
+        east_asia, latin, size_pt, bold = paragraph_kind(paragraph)
+        if paragraph.style.name.lower().startswith("toc"):
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        tighten_reference_paragraph(paragraph)
+        for run in paragraph.runs:
+            if not run.text:
+                continue
+            if is_inline_citation_run(run):
+                set_run_visual(run, "宋体", "Times New Roman", 9, None)
+                vert = ensure_child(run._element.get_or_add_rPr(), "w:vertAlign")
+                vert.set(qn("w:val"), "superscript")
+                continue
+            set_run_visual(run, east_asia, latin, size_pt, bold)
+
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for paragraph in cell.paragraphs:
+                    east_asia, latin, size_pt, bold = paragraph_kind(paragraph)
+                    for run in paragraph.runs:
+                        if run.text:
+                            set_run_visual(run, east_asia, latin, size_pt, bold)
+
+    doc.save(str(OUT))
+
+
+def patch_xml_colors_and_styles() -> None:
+    tmp = OUT.with_suffix(".tmp.docx")
+    with ZipFile(OUT, "r") as zin, ZipFile(tmp, "w", ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if item.filename.startswith("word/") and item.filename.endswith(".xml"):
+                root = etree.fromstring(data)
+                changed = False
+                for color in root.xpath(".//w:color", namespaces=NS):
+                    color.set(f"{{{W_NS}}}val", "000000")
+                    for attr in ("themeColor", "themeTint", "themeShade"):
+                        color.attrib.pop(f"{{{W_NS}}}{attr}", None)
+                    changed = True
+                for highlight in root.xpath(".//w:highlight", namespaces=NS):
+                    val = highlight.get(f"{{{W_NS}}}val")
+                    if val and val.lower() not in {"none", "clear"}:
+                        highlight.set(f"{{{W_NS}}}val", "none")
+                        changed = True
+                if item.filename == "word/styles.xml":
+                    changed = patch_styles_xml(root) or changed
+                if changed:
+                    data = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+            zout.writestr(item, data)
+    tmp.replace(OUT)
+
+
+def patch_styles_xml(root) -> bool:
+    changed = False
+    for style in root.xpath(".//w:style", namespaces=NS):
+        sid = style.get(f"{{{W_NS}}}styleId") or ""
+        name_elem = style.find("w:name", namespaces=NS)
+        name = name_elem.get(f"{{{W_NS}}}val") if name_elem is not None else sid
+        rpr = style.find("w:rPr", namespaces=NS)
+        if rpr is None:
+            rpr = OxmlElement("w:rPr")
+            style.append(rpr)
+        set_xml_color_black(rpr)
+        lower_name = (name or "").lower()
+        if sid == "1" or lower_name == "heading 1":
+            set_xml_fonts(rpr, "黑体", "Times New Roman")
+            set_xml_size(rpr, 16)
+        elif sid == "2" or lower_name == "heading 2":
+            set_xml_fonts(rpr, "黑体", "Times New Roman")
+            set_xml_size(rpr, 14)
+        elif sid == "3" or lower_name == "heading 3":
+            set_xml_fonts(rpr, "黑体", "Times New Roman")
+            set_xml_size(rpr, 12)
+        elif lower_name.startswith("toc"):
+            set_xml_fonts(rpr, "宋体", "Times New Roman")
+            set_xml_size(rpr, 12)
+        elif name == "Hyperlink":
+            set_xml_fonts(rpr, "宋体", "Times New Roman")
+            underline = rpr.find(qn("w:u"))
+            if underline is not None:
+                underline.set(qn("w:val"), "none")
+        elif "tok" in sid.lower() or "verbatim" in sid.lower() or name in {"Code", "Source Code", "HTML Code", "Listing"}:
+            set_xml_fonts(rpr, "Consolas", "Consolas")
+            set_xml_size(rpr, 10.5)
+        elif lower_name in {"normal", "body text", "caption"} or name in {"Normal", "Body Text", "caption"}:
+            set_xml_fonts(rpr, "宋体", "Times New Roman")
+        changed = True
+    return changed
+
+
+def export_pdf() -> None:
+    if PDF.exists():
+        PDF.unlink()
+    subprocess.run(
+        [
+            r"C:/Program Files/LibreOffice/program/soffice.com",
+            "--headless",
+            "--convert-to",
+            "pdf",
+            "--outdir",
+            str(OUT.parent),
+            str(OUT),
+        ],
+        check=True,
+    )
+
+
+def run_checker() -> None:
+    env = dict(__import__("os").environ)
+    env["PYTHONIOENCODING"] = "utf-8"
+    subprocess.run(
+        [
+            r"C:/Users/ASUS-KL/AppData/Roaming/Python/Python313/Scripts/thesis-check.exe",
+            "check",
+            str(OUT),
+            "--preset",
+            "ncwu",
+            "--md",
+            str(REPORT),
+        ],
+        check=True,
+        env=env,
+    )
+
+
+def render_pdf_pages() -> list[Path]:
+    if PAGE_DIR.exists():
+        shutil.rmtree(PAGE_DIR)
+    PAGE_DIR.mkdir(parents=True, exist_ok=True)
+    prefix = PAGE_DIR / "page"
+    subprocess.run(["pdftoppm", "-r", "72", "-png", str(PDF), str(prefix)], check=True)
+    return sorted(PAGE_DIR.glob("page-*.png"))
+
+
+def page_number_from_path(path: Path) -> int:
+    match = re.search(r"-(\d+)\.png$", path.name)
+    return int(match.group(1)) if match else -1
+
+
+def scan_pdf_blank_space() -> list[dict]:
+    from PIL import Image
+
+    suspects: list[dict] = []
+    for path in render_pdf_pages():
+        page = page_number_from_path(path)
+        img = Image.open(path).convert("L")
+        width, height = img.size
+        pix = img.load()
+        y0, y1 = int(height * 0.06), int(height * 0.86)
+        x0, x1 = int(width * 0.08), int(width * 0.92)
+        ys: list[int] = []
+        for y in range(y0, y1):
+            row_dark = 0
+            for x in range(x0, x1):
+                if pix[x, y] < 245:
+                    row_dark += 1
+            if row_dark >= 4:
+                ys.append(y)
+        if not ys:
+            suspects.append({"page": page, "reason": "blank-or-nearly-blank", "bottom_blank_ratio": 1.0})
+            continue
+        last_y = max(ys)
+        bottom_blank_ratio = (y1 - last_y) / height
+        if bottom_blank_ratio >= 0.32:
+            suspects.append(
+                {
+                    "page": page,
+                    "last_content_y": last_y,
+                    "body_bottom_y": y1,
+                    "bottom_blank_ratio": round(bottom_blank_ratio, 3),
+                }
+            )
+    BLANK_REPORT.write_text(json.dumps(suspects, ensure_ascii=False, indent=2), encoding="utf-8")
+    return suspects
+
+
+def audit_visual_format() -> dict:
+    counters = {
+        "visible_runs": 0,
+        "non_black_runs": 0,
+        "style_non_black": 0,
+    }
+    with ZipFile(OUT) as z:
+        for filename in [n for n in z.namelist() if n.startswith("word/") and n.endswith(".xml")]:
+            root = etree.fromstring(z.read(filename))
+            for run in root.xpath(".//w:r", namespaces=NS):
+                text = "".join(t.text or "" for t in run.xpath(".//w:t", namespaces=NS)).strip()
+                if not text:
+                    continue
+                counters["visible_runs"] += 1
+                color = run.find("w:rPr/w:color", namespaces=NS)
+                if color is not None and color.get(f"{{{W_NS}}}val") not in {None, "000000", "auto"}:
+                    counters["non_black_runs"] += 1
+        styles = etree.fromstring(z.read("word/styles.xml"))
+        for color in styles.xpath(".//w:style/w:rPr/w:color", namespaces=NS):
+            if color.get(f"{{{W_NS}}}val") not in {None, "000000", "auto"}:
+                counters["style_non_black"] += 1
+    return counters
+
+
+def update_version_log(blank_suspects: list[dict], audit: dict) -> None:
+    entry = f"""
+
+## v012 - 全篇黑色字体统一版
+
+- 文件: `{OUT}`
+- PDF: `{PDF}`
+- 检测报告: `{REPORT}`
+- 留白扫描: `{BLANK_REPORT}`，可疑页 {len(blank_suspects)} 页
+- 处理内容:
+  - 将 Hyperlink、TOC、Pandoc 代码 token 等样式表颜色统一为黑色，移除主题色残留。
+  - 将正文、标题、题注、目录、页眉页脚和代码段的基础字体口径统一。
+  - 在第2章小结、第4.2节、第6章小结补入短承接段，修复明显页尾留白和叙述断裂。
+- 颜色审计: visible_runs={audit['visible_runs']}, non_black_runs={audit['non_black_runs']}, style_non_black={audit['style_non_black']}
+"""
+    if VERSION_LOG.exists():
+        text = VERSION_LOG.read_text(encoding="utf-8")
+    else:
+        text = "# 202213210刘高朋修改迭代版 版本记录\n"
+    if "## v012 - 全篇黑色字体统一版" not in text:
+        VERSION_LOG.write_text(text.rstrip() + entry + "\n", encoding="utf-8")
+
+
+def main() -> None:
+    if not SRC.exists():
+        raise FileNotFoundError(SRC)
+    normalize_docx_with_python_docx()
+    patch_xml_colors_and_styles()
+    export_pdf()
+    run_checker()
+    blank_suspects = scan_pdf_blank_space()
+    audit = audit_visual_format()
+    update_version_log(blank_suspects, audit)
+    print(f"OUT={OUT}")
+    print(f"PDF={PDF}")
+    print(f"REPORT={REPORT}")
+    print(f"BLANK_REPORT={BLANK_REPORT}")
+    print(f"blank_suspects={len(blank_suspects)} {blank_suspects}")
+    print(f"audit={audit}")
+
+
+if __name__ == "__main__":
+    main()

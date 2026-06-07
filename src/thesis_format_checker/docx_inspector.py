@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
+import re
+from zipfile import ZipFile
+from xml.etree import ElementTree as ET
 from typing import Any
 
 from docx import Document
@@ -26,6 +29,16 @@ class StyleInfo:
     bold: bool | None = None
     align: str | None = None
     line_spacing: float | None = None
+    color: str | None = None
+    theme_color: str | None = None
+
+
+@dataclass
+class RunColorInfo:
+    source: str
+    text: str
+    color: str | None = None
+    theme_color: str | None = None
 
 
 @dataclass
@@ -53,6 +66,8 @@ class ParagraphInfo:
     first_run_latin: str | None
     first_run_size_pt: float | None
     first_run_bold: bool | None
+    inline_ref_count: int = 0
+    inline_ref_not_superscript_count: int = 0
 
 
 @dataclass
@@ -71,6 +86,7 @@ class InspectResult:
     styles: dict[str, StyleInfo] = field(default_factory=dict)
     paragraphs: list[ParagraphInfo] = field(default_factory=list)
     tables: list[TableInfo] = field(default_factory=list)
+    non_black_runs: list[RunColorInfo] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -79,6 +95,7 @@ class InspectResult:
             "styles": {k: asdict(v) for k, v in self.styles.items()},
             "paragraphs": [asdict(p) for p in self.paragraphs],
             "tables": [asdict(t) for t in self.tables],
+            "non_black_runs": [asdict(r) for r in self.non_black_runs],
         }
 
 
@@ -109,6 +126,15 @@ def _extract_font_from_rpr(rpr) -> tuple[str | None, str | None, float | None, b
         val = b.get(qn("w:val"))
         bold = val != "0" and val != "false"
     return east_asia, latin, size_pt, bold
+
+
+def _extract_color_from_rpr(rpr) -> tuple[str | None, str | None]:
+    if rpr is None:
+        return None, None
+    color = rpr.find(qn("w:color"))
+    if color is None:
+        return None, None
+    return color.get(qn("w:val")), color.get(qn("w:themeColor"))
 
 
 def _extract_alignment(ppr) -> str | None:
@@ -148,6 +174,7 @@ def _extract_styles(doc) -> dict[str, StyleInfo]:
         rpr = element.find(qn("w:rPr"))
         ppr = element.find(qn("w:pPr"))
         ea, latin, size_pt, bold = _extract_font_from_rpr(rpr)
+        color, theme_color = _extract_color_from_rpr(rpr)
         align = _extract_alignment(ppr)
         line_sp = _extract_line_spacing(ppr)
         try:
@@ -164,7 +191,48 @@ def _extract_styles(doc) -> dict[str, StyleInfo]:
             bold=bold,
             align=align,
             line_spacing=line_sp,
+            color=color,
+            theme_color=theme_color,
         )
+    return out
+
+
+def _is_non_black_color(color: str | None, theme_color: str | None) -> bool:
+    if theme_color:
+        return True
+    if color is None:
+        return False
+    return color.lower() not in {"000000", "auto"}
+
+
+def _extract_non_black_runs(path: Path) -> list[RunColorInfo]:
+    out: list[RunColorInfo] = []
+    with ZipFile(path) as archive:
+        xml_files = [
+            name for name in archive.namelist()
+            if name.startswith("word/") and name.endswith(".xml")
+        ]
+        for name in xml_files:
+            root = ET.fromstring(archive.read(name))
+            for run in root.findall(f".//{W_NS}r"):
+                text = "".join(node.text or "" for node in run.findall(f".//{W_NS}t")).strip()
+                if not text:
+                    continue
+                rpr = run.find(f"{W_NS}rPr")
+                if rpr is None:
+                    continue
+                color_el = rpr.find(f"{W_NS}color")
+                if color_el is None:
+                    continue
+                color = color_el.get(f"{W_NS}val")
+                theme_color = color_el.get(f"{W_NS}themeColor")
+                if _is_non_black_color(color, theme_color):
+                    out.append(RunColorInfo(
+                        source=name,
+                        text=text[:80],
+                        color=color,
+                        theme_color=theme_color,
+                    ))
     return out
 
 
@@ -199,6 +267,7 @@ def _extract_sections(doc) -> list[SectionInfo]:
 
 def _extract_paragraphs(doc) -> list[ParagraphInfo]:
     paragraphs = []
+    inline_ref_re = re.compile(r"\[\d+\]")
     for i, p in enumerate(doc.paragraphs):
         ppr = p._p.find(qn("w:pPr"))
         align = _extract_alignment(ppr)
@@ -211,11 +280,28 @@ def _extract_paragraphs(doc) -> list[ParagraphInfo]:
         has_page_break_run = False
         ea = latin = size_pt = None
         bold = None
+        inline_ref_count = 0
+        inline_ref_not_superscript_count = 0
         for run in p.runs:
+            run_text = run.text or ""
             for br in run._r.findall(qn("w:br")):
                 if br.get(qn("w:type")) == "page":
                     has_page_break_run = True
-            if ea is None:
+            refs = inline_ref_re.findall(run_text)
+            if refs:
+                inline_ref_count += len(refs)
+                rpr = run._r.find(qn("w:rPr"))
+                _ea, _latin, ref_size_pt, _bold = _extract_font_from_rpr(rpr)
+                is_superscript = False
+                if rpr is not None:
+                    vert = rpr.find(qn("w:vertAlign"))
+                    if vert is not None and vert.get(qn("w:val")) == "superscript":
+                        is_superscript = True
+                if ref_size_pt is not None and ref_size_pt < 10:
+                    is_superscript = True
+                if not is_superscript:
+                    inline_ref_not_superscript_count += len(refs)
+            if ea is None and run.text.strip():
                 rpr = run._r.find(qn("w:rPr"))
                 ea, latin, size_pt, bold = _extract_font_from_rpr(rpr)
                 if ea is not None or latin is not None or size_pt is not None or bold is not None:
@@ -231,6 +317,8 @@ def _extract_paragraphs(doc) -> list[ParagraphInfo]:
             first_run_latin=latin,
             first_run_size_pt=size_pt,
             first_run_bold=bold,
+            inline_ref_count=inline_ref_count,
+            inline_ref_not_superscript_count=inline_ref_not_superscript_count,
         ))
     return paragraphs
 
@@ -271,4 +359,5 @@ def inspect(path: str | Path) -> InspectResult:
         styles=_extract_styles(doc),
         paragraphs=_extract_paragraphs(doc),
         tables=_extract_tables(doc),
+        non_black_runs=_extract_non_black_runs(path),
     )
