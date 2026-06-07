@@ -531,12 +531,12 @@ def fix_headers(doc: Document) -> None:
             section.footer.is_linked_to_previous = False
             for para in section.header.paragraphs:
                 if "华北水利水电大学毕业设计" in para.text:
-                    clear_paragraph_text_keep_first_run(para, "华北水利水电大学毕业设计（论文）")
+                    clear_paragraph_text_keep_first_run(para, "华北水利水电大学毕业设计")
                     para.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     break
             else:
                 para = section.header.paragraphs[0]
-                clear_paragraph_text_keep_first_run(para, "华北水利水电大学毕业设计（论文）")
+                clear_paragraph_text_keep_first_run(para, "华北水利水电大学毕业设计")
                 para.alignment = WD_ALIGN_PARAGRAPH.CENTER
             add_page_field(section.footer.paragraphs[0])
 
