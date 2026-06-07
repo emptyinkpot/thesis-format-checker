@@ -13,6 +13,7 @@ school-rule checker does not fully cover:
 from __future__ import annotations
 
 import json
+import sys
 import re
 import shutil
 import subprocess
@@ -318,6 +319,10 @@ def export_pdf() -> None:
             str(OUT),
         ],
         check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
     )
 
 
@@ -336,6 +341,10 @@ def run_checker() -> None:
         ],
         check=True,
         env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
     )
 
 
@@ -438,6 +447,10 @@ def update_version_log(blank_suspects: list[dict], audit: dict) -> None:
 
 
 def main() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     if not SRC.exists():
         raise FileNotFoundError(SRC)
     normalize_docx_with_python_docx()
