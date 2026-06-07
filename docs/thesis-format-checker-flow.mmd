@@ -1,0 +1,103 @@
+%% thesis-format-checker 工作流 · DOCX 论文格式合规校验器
+%% 生成 2026-06-05 | 源: emptyinkpot/thesis-format-checker (新建仓库)
+%% 配套 control.mmd(静态拓扑) · 本图回答"DOCX 怎么进、规则怎么算、问题怎么出报告、可修项怎么自动修"
+%% 铁律: 双解析器互补(pandoc 读内容/python-docx 读格式) · 规则集是 YAML 数据(可换学校) · auto-fix 永不原地覆盖
+flowchart TB
+
+    %% ===================== ① 输入层 =====================
+    subgraph INPUT["① 输入层 · 待校验 DOCX + 规则 preset"]
+        direction TB
+        DOCX["thesis.docx<br/>(任意 Word 论文文件)"]
+        PRESET["preset YAML<br/>presets/ncwu.yaml (内置)<br/>或 --rules custom.yaml"]
+        CLI["thesis-check check thesis.docx<br/>--preset / --rules / --json / --md / --fix"]
+        DOCX --> CLI
+        PRESET --> CLI
+    end
+
+    %% ===================== ② 双解析层 =====================
+    subgraph PARSE["② 双解析层 · 互补提取"]
+        direction TB
+        DOCXI["docx_inspector.py<br/>(python-docx + lxml)<br/>→ sections/styles/paragraphs/tables<br/>读: 字号·字体·行距·页边距·页眉·样式继承"]
+        CONTENTI["content_inspector.py<br/>(pandoc subprocess)<br/>→ ContentResult<br/>读: 摘要字数·目录·封面字段·章节列表"]
+        REASON1["⚠️ python-docx 读不到:<br/>SDT 自动目录 / 封面表格嵌套字段"]
+        REASON2["⚠️ pandoc 读不到:<br/>字号/字体/行距/页边距等格式属性"]
+        DOCXI -.补.- REASON2
+        CONTENTI -.补.- REASON1
+    end
+
+    CLI --> DOCXI
+    CLI --> CONTENTI
+
+    %% ===================== ③ 规则评估层 =====================
+    subgraph RULES["③ 规则评估层 · @rule 装饰器注册"]
+        direction TB
+        REG["RULES dict<br/>(rules.py 顶部)"]
+        FNS["check_page_margins<br/>check_body_font_size<br/>check_heading_style_applied<br/>check_abstract_zh_length<br/>check_foreign_translation_length<br/>check_cover_fields ...等 16 条"]
+        EVAL["evaluate_all<br/>每条规则: severity/enabled 由 preset 覆盖"]
+        FINDS["Finding 列表<br/>{rule_id, severity, message, expected, actual, location, fixable}"]
+        REG --> FNS
+        FNS --> EVAL
+        EVAL --> FINDS
+    end
+
+    DOCXI --> EVAL
+    CONTENTI --> EVAL
+    PRESET --> EVAL
+
+    %% ===================== ④ 输出层 =====================
+    subgraph REPORT["④ 输出层 · report.py"]
+        direction TB
+        RICH["rich 终端表格<br/>error 红 / warning 黄 / info 蓝<br/>按 severity 分组"]
+        JSON_OUT["--json: machine-readable<br/>schema 同 export_thesis 的 layout_report"]
+        MD_OUT["--md: markdown 报告<br/>方便贴 PR / GitHub Issue"]
+        FINDS --> RICH
+        FINDS --> JSON_OUT
+        FINDS --> MD_OUT
+    end
+
+    %% ===================== ⑤ 自动修正层 (可选) =====================
+    subgraph FIX["⑤ 自动修正层 · fixer.py (--fix 触发)"]
+        direction TB
+        FILTER{"f.fixable == True?"}
+        COPY["shutil.copy2 input → output<br/>⭐永不原地覆盖"]
+        APPLY["按规则分组修:<br/>page-margins → section.margin<br/>body-font-size → Normal style<br/>heading-style-applied → 启发式重指派"]
+        SAVED["fixed.docx<br/>(开 Word 二次确认)"]
+        FILTER -- "Y" --> COPY
+        COPY --> APPLY
+        APPLY --> SAVED
+        FILTER -- "N (字数/目录/封面)" --> MANUAL["⚠️ 不可自动修<br/>提示用户手工补"]
+    end
+
+    FINDS --> FILTER
+
+    %% ===================== ⑥ 退出码 (CI 友好) =====================
+    EXIT0["exit 0: 全 pass"]
+    EXIT1["exit 1: 有 warning"]
+    EXIT2["exit 2: 有 error"]
+    EXIT3["exit 3: 工具/输入错误<br/>(pandoc 缺失/preset 不存在)"]
+
+    RICH --> EXIT0
+    RICH --> EXIT1
+    RICH --> EXIT2
+    CLI -.fail-closed.-> EXIT3
+
+    %% ===================== 关键边界 =====================
+    BOUND1["⭐ 与 export_thesis.py 的关系:<br/>那是生成式管线(md→docx)<br/>这是反向校验器(docx→report)<br/>两者解耦不互相调用"]
+    BOUND2["⭐ 规则可配置不可硬编码:<br/>新学校 = 新 preset YAML<br/>不动代码"]
+
+    RULES -.- BOUND2
+    FIX -.- BOUND1
+
+    %% ===================== 样式 =====================
+    classDef input fill:#e1f5ff,stroke:#0288d1
+    classDef parse fill:#f3e5f5,stroke:#7b1fa2
+    classDef rules fill:#fff3e0,stroke:#f57c00
+    classDef report fill:#e8f5e9,stroke:#388e3c
+    classDef fix fill:#fce4ec,stroke:#c2185b
+    classDef warn fill:#ffebee,stroke:#c62828
+    class DOCX,PRESET,CLI input
+    class DOCXI,CONTENTI parse
+    class REG,FNS,EVAL,FINDS rules
+    class RICH,JSON_OUT,MD_OUT report
+    class FILTER,COPY,APPLY,SAVED fix
+    class REASON1,REASON2,MANUAL,EXIT3,BOUND1,BOUND2 warn

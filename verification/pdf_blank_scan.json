@@ -1,0 +1,44 @@
+[
+  {
+    "page": 2,
+    "last_content_y": 370,
+    "body_bottom_y": 724,
+    "bottom_blank_ratio": 0.42
+  },
+  {
+    "page": 3,
+    "last_content_y": 340,
+    "body_bottom_y": 724,
+    "bottom_blank_ratio": 0.456
+  },
+  {
+    "page": 51,
+    "last_content_y": 446,
+    "body_bottom_y": 724,
+    "bottom_blank_ratio": 0.33
+  },
+  {
+    "page": 52,
+    "last_content_y": 446,
+    "body_bottom_y": 724,
+    "bottom_blank_ratio": 0.33
+  },
+  {
+    "page": 68,
+    "last_content_y": 404,
+    "body_bottom_y": 724,
+    "bottom_blank_ratio": 0.38
+  },
+  {
+    "page": 70,
+    "last_content_y": 111,
+    "body_bottom_y": 724,
+    "bottom_blank_ratio": 0.728
+  },
+  {
+    "page": 76,
+    "last_content_y": 416,
+    "body_bottom_y": 724,
+    "bottom_blank_ratio": 0.366
+  }
+]
