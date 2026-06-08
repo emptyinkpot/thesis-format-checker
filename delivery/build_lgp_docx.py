@@ -69,14 +69,30 @@ VERSION_LOG = DOWNLOADS / f"{DOCX_STEM}_版本记录.md"
 EXPECTED_HEADER = "华北水利水电大学毕业设计"
 COVER_TEMPLATE = DOWNLOADS / "202213210刘高朋_文献综述_标准模板版.docx"
 COVER_TITLE = "毕业设计（论文）"
-ENGINEERING_ASSET_ROOT = Path(r"E:/My Project/KiCad/_workspace/projects/STM32_CO2/thesis-build/assets")
+ENGINEERING_PAPER_READY_ROOT = Path(
+    r"E:/My Project/毕业设计论文/论文/我的论文/给老师_工程资料包_2026-05-26/06_论文插图与截图/07_paper_ready"
+)
+ENGINEERING_RENDER_DIR = DOWNLOADS / f"{DOCX_STEM}_v{OUT_VERSION:03d}_engineering_assets"
+ENGINEERING_MIN_IMAGE_HEIGHT_EMU = 3_000_000
 ENGINEERING_FIGURES = {
-    "图3.2 系统原理与模块关系图": ENGINEERING_ASSET_ROOT / "figure_01_system_principle_schematic.png",
-    "图3.3 STM32主控接口分配图": ENGINEERING_ASSET_ROOT / "figure_02_pre_bluepill_schematic.png",
+    "图3.2 系统原理图": ENGINEERING_PAPER_READY_ROOT / "figure_01_system_principle_schematic.png",
+    "图3.3 STM32主控接口原理图": ENGINEERING_PAPER_READY_ROOT / "figure_02_pre_bluepill_schematic.png",
+    "图3.4 PCB顶层布线检查图": ENGINEERING_PAPER_READY_ROOT / "figure_03a_pre_bluepill_top_copper_review.png",
+    "图3.5 PCB三维装配与模块位置图": ENGINEERING_PAPER_READY_ROOT / "figure_04_pre_bluepill_pcb_3d.png",
 }
 ENGINEERING_CAPTION_RENAMES = {
-    "图3.2 系统硬件连接与接口关系图": "图3.2 系统原理与模块关系图",
-    "图3.3 传感、显示与通信接口分配图": "图3.3 STM32主控接口分配图",
+    "图3.2 系统硬件连接与接口关系图": "图3.2 系统原理图",
+    "图3.2 系统原理与模块关系图": "图3.2 系统原理图",
+    "图3.3 传感、显示与通信接口分配图": "图3.3 STM32主控接口原理图",
+    "图3.3 STM32主控接口分配图": "图3.3 STM32主控接口原理图",
+    "图3.4 STM32主控引脚分配图": "图3.4 PCB顶层布线检查图",
+    "图3.5 供电稳压与调试检查路径图": "图3.5 PCB三维装配与模块位置图",
+}
+TEXT_REPLACEMENTS = {
+    "主控侧资源分配见图3.4和表3.1。": "主控侧资源分配见表3.1，PCB布线与装配关系见图3.4、图3.5。",
+    "无线通信接口关系已经在图3.2和图3.3中体现，软件上传流程见图4.3。": (
+        "无线通信接口关系已经在图3.2和图3.3中体现，PCB布线与模块装配见图3.4、图3.5，软件上传流程见图4.3。"
+    ),
 }
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -103,7 +119,7 @@ FORBIDDEN_TERMS = [
     "本文按照",
 ]
 
-ALLOWED_BLANK_PAGES = {2, 3, 23, 52, 53, 69, 76}
+ALLOWED_BLANK_PAGES = {2, 3, 23, 53, 54, 70, 77}
 ALLOWED_EAST_ASIA_FONTS = {"宋体", "黑体", "楷体", "仿宋_GB2312", "隶书", "Consolas"}
 ALLOWED_LATIN_FONTS = {"Times New Roman", "Consolas", "宋体"}
 
@@ -123,7 +139,7 @@ BRIDGE_PARAGRAPHS = {
     ],
     "图3.1按“左侧实物、右侧说明”的方式介绍主要硬件模块": [
         "这张图不是单独展示器件外观，而是作为第3章的模块索引：左侧实物帮助读者先识别SCD41、STM32、OLED、ESP8266和报警器件，右侧说明再对应到接口连接、原理图、PCB、固件源码和后续测试项目。这样处理后，实物、原理图、接口、PCB、源码和测试能够落在同一条说明链路上。",
-        "图3.2和图3.3继续把该索引落到工程图纸上。图3.2对应系统原理图，说明供电、传感、显示、通信、报警和调试接口之间的模块关系；图3.3对应STM32主控接口原理图，说明PB10/PB12、PB6/PB7、PA9/PA10、PA0、PB4/PB11等引脚怎样连接到SCD41、OLED、ESP8266、蜂鸣器和LED。PCB布线、ERC/DRC检查和固件文件main.c、scd41.c、bsp_pins.h、第6章测试验证一起构成后续说明依据。"
+        "图3.2至图3.5继续把该索引落到工程图纸上。图3.2和图3.3采用已经整理好的系统连线图和主控接口分配截图，分别说明系统供电、传感、显示、通信、报警、调试接口以及STM32主控引脚分配；图3.4和图3.5采用PCB布线与三维装配导出，说明顶层走线、排针位置和主要模块安装关系。ERC/DRC检查记录、固件文件main.c、scd41.c、bsp_pins.h以及第6章测试验证一起构成后续说明依据。"
     ],
     "传感器采集功能对应硬件SCD41和软件scd41.c": [
         "图5.2用于说明采集代码和显示刷新之间的衔接关系。读图时应先看SCD41读取结果怎样进入主程序状态，再看OLED刷新和报警判断怎样使用同一组有效采样值。"
@@ -155,6 +171,7 @@ BRIDGE_PARAGRAPHS = {
 SUPERSEDED_PARAGRAPH_PREFIXES = [
     "这张图不是单独展示器件外观，而是作为第3章的模块索引：左侧实物帮助读者先识别",
     "图3.2和图3.3继续把该索引落到工程图纸上。",
+    "图3.2至图3.5继续把该索引落到工程图纸上。",
 ]
 
 
@@ -300,9 +317,15 @@ def tighten_reference_paragraph(paragraph) -> None:
 
 
 def remove_superseded_paragraphs(doc: Document) -> None:
+    generated_prefixes = [
+        *SUPERSEDED_PARAGRAPH_PREFIXES,
+        *(text for texts in BRIDGE_PARAGRAPHS.values() for text in texts),
+    ]
+    normalized_prefixes = [normalize_text(prefix) for prefix in generated_prefixes]
     for paragraph in list(doc.paragraphs):
         text = paragraph.text.strip()
-        if any(text.startswith(prefix) for prefix in SUPERSEDED_PARAGRAPH_PREFIXES):
+        normalized = normalize_text(text)
+        if any(normalized.startswith(prefix) for prefix in normalized_prefixes):
             paragraph._element.getparent().remove(paragraph._element)
 
 
@@ -367,6 +390,18 @@ def rename_engineering_captions(doc: Document) -> None:
             paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
 
+def apply_text_replacements(doc: Document) -> None:
+    for paragraph in doc.paragraphs:
+        text = paragraph.text
+        patched = text
+        for old, new in TEXT_REPLACEMENTS.items():
+            patched = patched.replace(old, new)
+        if patched != text:
+            run = replace_paragraph_text(paragraph, patched)
+            east_asia, latin, size_pt, bold = paragraph_kind(paragraph)
+            set_run_visual(run, east_asia, latin, size_pt, bold)
+
+
 def normalize_caption_run(run) -> None:
     run.italic = False
     run.font.italic = False
@@ -394,6 +429,49 @@ def _image_size(path: Path) -> tuple[int, int]:
 
     with Image.open(path) as image:
         return image.size
+
+
+def magick_command() -> str:
+    command = shutil.which("magick") or r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"
+    if not Path(command).exists() and shutil.which(command) is None:
+        raise RuntimeError("ImageMagick magick command is required to render SVG engineering figures")
+    return command
+
+
+def render_engineering_source(source: Path, target: Path) -> Path:
+    if source.suffix.lower() == ".svg":
+        subprocess.run(
+            [
+                magick_command(),
+                "-density",
+                "220",
+                "-background",
+                "white",
+                str(source),
+                "-alpha",
+                "remove",
+                "-alpha",
+                "off",
+                "-strip",
+                str(target),
+            ],
+            check=True,
+        )
+    else:
+        shutil.copy2(source, target)
+    return target
+
+
+def prepare_engineering_figure_assets() -> dict[str, Path]:
+    ENGINEERING_RENDER_DIR.mkdir(parents=True, exist_ok=True)
+    rendered: dict[str, Path] = {}
+    for index, (caption, source) in enumerate(ENGINEERING_FIGURES.items(), start=1):
+        if not source.exists():
+            raise FileNotFoundError(f"engineering figure missing for {caption}: {source}")
+        target = ENGINEERING_RENDER_DIR / f"figure_{index:02d}_{source.stem}.png"
+        render_engineering_source(source, target)
+        rendered[caption] = target
+    return rendered
 
 
 def _target_zip_name(target: str) -> str:
@@ -449,10 +527,20 @@ def _set_inline_image_aspect(blip, image_path: Path) -> None:
         pic_extent.set("cy", str(cy))
 
 
+def _inline_extent_for_blip(blip) -> tuple[int, int] | None:
+    inline = blip
+    while inline is not None and inline.tag != f"{{{WP_NS}}}inline":
+        inline = inline.getparent()
+    if inline is None:
+        return None
+    extent = inline.find("wp:extent", namespaces=NS)
+    if extent is None:
+        return None
+    return int(extent.get("cx") or "0"), int(extent.get("cy") or "0")
+
+
 def replace_engineering_figure_media() -> None:
-    for caption, figure in ENGINEERING_FIGURES.items():
-        if not figure.exists():
-            raise FileNotFoundError(f"engineering figure missing for {caption}: {figure}")
+    figure_assets = prepare_engineering_figure_assets()
 
     tmp = OUT.with_suffix(".figures.tmp.docx")
     replaced: set[str] = set()
@@ -465,7 +553,7 @@ def replace_engineering_figure_media() -> None:
         }
         caption_blips = _caption_previous_blips(document_root)
         media_replacements: dict[str, bytes] = {}
-        for caption, figure in ENGINEERING_FIGURES.items():
+        for caption, figure in figure_assets.items():
             blips = caption_blips.get(caption)
             if not blips:
                 raise RuntimeError(f"cannot locate image before caption: {caption}")
@@ -515,6 +603,24 @@ def _engineering_figure_media_targets(docx_path: Path) -> dict[str, str]:
     return targets
 
 
+def _engineering_figure_display_extents(docx_path: Path) -> dict[str, tuple[int, int]]:
+    with ZipFile(docx_path, "r") as archive:
+        document_root = etree.fromstring(archive.read("word/document.xml"))
+        caption_blips = _caption_previous_blips(document_root)
+
+    extents: dict[str, tuple[int, int]] = {}
+    for caption in ENGINEERING_FIGURES:
+        blips = caption_blips.get(caption)
+        if not blips:
+            raise RuntimeError(f"cannot locate image before caption: {caption}")
+        _rid, blip = blips[0]
+        extent = _inline_extent_for_blip(blip)
+        if extent is None:
+            raise RuntimeError(f"cannot locate display extent for engineering figure: {caption}")
+        extents[caption] = extent
+    return extents
+
+
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -522,13 +628,12 @@ def _sha256(data: bytes) -> str:
 def verify_engineering_figure_assets(docx_path: Path | None = None) -> dict[str, str]:
     """Verify that required engineering captions point to the real source assets."""
     target_docx = docx_path or OUT
-    for caption, figure in ENGINEERING_FIGURES.items():
-        if not figure.exists():
-            raise FileNotFoundError(f"engineering figure missing for {caption}: {figure}")
+    figure_assets = prepare_engineering_figure_assets()
 
     media_targets = _engineering_figure_media_targets(target_docx)
+    display_extents = _engineering_figure_display_extents(target_docx)
     with ZipFile(target_docx, "r") as archive:
-        for caption, figure in ENGINEERING_FIGURES.items():
+        for caption, figure in figure_assets.items():
             media_name = media_targets.get(caption)
             if not media_name:
                 raise RuntimeError(f"engineering figure media target missing for {caption}")
@@ -538,6 +643,12 @@ def verify_engineering_figure_assets(docx_path: Path | None = None) -> dict[str,
                 raise RuntimeError(
                     f"engineering figure mismatch for {caption}: "
                     f"{media_name} sha256={actual_hash}, expected={expected_hash}"
+                )
+            _cx, cy = display_extents[caption]
+            if cy < ENGINEERING_MIN_IMAGE_HEIGHT_EMU:
+                raise RuntimeError(
+                    f"engineering figure is too small on page for {caption}: "
+                    f"height_emu={cy}, expected>={ENGINEERING_MIN_IMAGE_HEIGHT_EMU}"
                 )
     return media_targets
 
@@ -606,6 +717,7 @@ def normalize_docx_with_python_docx() -> None:
     remove_superseded_paragraphs(doc)
     insert_bridge_paragraphs(doc)
     rename_engineering_captions(doc)
+    apply_text_replacements(doc)
     normalize_caption_style(doc)
 
     for style in doc.styles:
@@ -1012,6 +1124,23 @@ def verify_forbidden_terms() -> None:
         raise RuntimeError(f"forbidden terms present: {hits}")
 
 
+def verify_bridge_paragraphs_once(path: Path | None = None) -> None:
+    target = path or OUT
+    doc = Document(str(target))
+    paragraphs = [normalize_text(paragraph.text) for paragraph in doc.paragraphs if paragraph.text.strip()]
+    missing: list[str] = []
+    repeated: dict[str, int] = {}
+    for text in (item for texts in BRIDGE_PARAGRAPHS.values() for item in texts):
+        normalized = normalize_text(text)
+        count = sum(1 for paragraph in paragraphs if paragraph == normalized)
+        if count == 0:
+            missing.append(text[:40])
+        elif count > 1:
+            repeated[text[:40]] = count
+    if missing or repeated:
+        raise RuntimeError(f"bridge paragraph contract failed: missing={missing}, repeated={repeated}")
+
+
 def verify_image_table_count() -> None:
     before = Document(str(SRC))
     after = Document(str(OUT))
@@ -1090,6 +1219,7 @@ def main() -> None:
     verify_cover_contract()
     verify_font_contract()
     verify_forbidden_terms()
+    verify_bridge_paragraphs_once()
     verify_image_table_count()
     verify_engineering_figure_assets()
     blank_suspects = scan_pdf_blank_space()

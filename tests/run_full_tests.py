@@ -24,6 +24,7 @@ import json
 import os
 import posixpath
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -50,10 +51,12 @@ COVER_TITLE = "毕业设计（论文）"
 W_URI = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 R_URI = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 A_URI = "http://schemas.openxmlformats.org/drawingml/2006/main"
+WP_URI = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
 RELS_URI = "http://schemas.openxmlformats.org/package/2006/relationships"
 W_NS = f"{{{W_URI}}}"
 R_NS = f"{{{R_URI}}}"
 A_NS = f"{{{A_URI}}}"
+WP_NS = f"{{{WP_URI}}}"
 RELS_NS = f"{{{RELS_URI}}}"
 
 ET.register_namespace("w", W_URI)
@@ -76,7 +79,7 @@ FORBIDDEN_TERMS = [
     "本文按照",
 ]
 
-ALLOWED_BLANK_PAGES = {2, 3, 23, 52, 53, 69, 76}
+ALLOWED_BLANK_PAGES = {2, 3, 23, 53, 54, 70, 77}
 ALLOWED_EAST_ASIA_FONTS = {"宋体", "黑体", "楷体", "仿宋_GB2312", "隶书", "Consolas"}
 ALLOWED_LATIN_FONTS = {"Times New Roman", "Consolas", "宋体"}
 
@@ -89,10 +92,15 @@ COVER_TABLE_ROWS = [
     ("完成时间", "2026年6月"),
 ]
 BODY_MUTATION_ANCHOR = "本章回答本设计为什么需要开展"
-ENGINEERING_ASSET_ROOT = Path(r"E:/My Project/KiCad/_workspace/projects/STM32_CO2/thesis-build/assets")
+ENGINEERING_PAPER_READY_ROOT = Path(
+    r"E:/My Project/毕业设计论文/论文/我的论文/给老师_工程资料包_2026-05-26/06_论文插图与截图/07_paper_ready"
+)
+ENGINEERING_MIN_IMAGE_HEIGHT_EMU = 3_000_000
 ENGINEERING_FIGURES = {
-    "图3.2 系统原理与模块关系图": ENGINEERING_ASSET_ROOT / "figure_01_system_principle_schematic.png",
-    "图3.3 STM32主控接口分配图": ENGINEERING_ASSET_ROOT / "figure_02_pre_bluepill_schematic.png",
+    "图3.2 系统原理图": ENGINEERING_PAPER_READY_ROOT / "figure_01_system_principle_schematic.png",
+    "图3.3 STM32主控接口原理图": ENGINEERING_PAPER_READY_ROOT / "figure_02_pre_bluepill_schematic.png",
+    "图3.4 PCB顶层布线检查图": ENGINEERING_PAPER_READY_ROOT / "figure_03a_pre_bluepill_top_copper_review.png",
+    "图3.5 PCB三维装配与模块位置图": ENGINEERING_PAPER_READY_ROOT / "figure_04_pre_bluepill_pcb_3d.png",
 }
 
 
@@ -178,6 +186,50 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def magick_command() -> str:
+    command = shutil.which("magick") or r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"
+    if not Path(command).exists() and shutil.which(command) is None:
+        raise RuntimeError("ImageMagick magick command is required to render SVG engineering figures")
+    return command
+
+
+def engineering_render_dir(docx_path: Path) -> Path:
+    version, _label = version_info(docx_path)
+    return DOWNLOADS / f"{DOCX_STEM}_v{version:03d}_engineering_assets"
+
+
+def prepare_engineering_figure_assets(docx_path: Path) -> dict[str, Path]:
+    render_dir = engineering_render_dir(docx_path)
+    render_dir.mkdir(parents=True, exist_ok=True)
+    rendered: dict[str, Path] = {}
+    for index, (caption, source) in enumerate(ENGINEERING_FIGURES.items(), start=1):
+        if not source.exists():
+            raise RuntimeError(f"engineering source asset missing for {caption}: {source}")
+        target = render_dir / f"figure_{index:02d}_{source.stem}.png"
+        if source.suffix.lower() == ".svg":
+            subprocess.run(
+                [
+                    magick_command(),
+                    "-density",
+                    "220",
+                    "-background",
+                    "white",
+                    str(source),
+                    "-alpha",
+                    "remove",
+                    "-alpha",
+                    "off",
+                    "-strip",
+                    str(target),
+                ],
+                check=True,
+            )
+        else:
+            shutil.copy2(source, target)
+        rendered[caption] = target
+    return rendered
+
+
 def docx_target_zip_name(target: str) -> str:
     if target.startswith("/"):
         return posixpath.normpath(target.lstrip("/"))
@@ -224,21 +276,56 @@ def engineering_figure_media_targets(docx_path: Path) -> dict[str, str]:
     return media_targets
 
 
-def verify_engineering_figure_assets(docx_path: Path) -> dict[str, str]:
-    missing_assets = [str(path) for path in ENGINEERING_FIGURES.values() if not path.exists()]
-    if missing_assets:
-        raise RuntimeError(f"engineering source assets missing: {missing_assets}")
-
-    media_targets = engineering_figure_media_targets(docx_path)
+def engineering_figure_display_extents(docx_path: Path) -> dict[str, tuple[int, int]]:
     with ZipFile(docx_path) as archive:
-        for caption, asset_path in ENGINEERING_FIGURES.items():
+        document_root = ET.fromstring(archive.read("word/document.xml"))
+
+    body = document_root.find(f"{W_NS}body")
+    if body is None:
+        raise RuntimeError("DOCX document body missing")
+
+    paragraphs = [child for child in body if child.tag == f"{W_NS}p"]
+    extents: dict[str, tuple[int, int]] = {}
+    for index, paragraph in enumerate(paragraphs):
+        caption = xml_paragraph_text(paragraph)
+        if caption not in ENGINEERING_FIGURES:
+            continue
+        for previous in reversed(paragraphs[max(0, index - 4):index]):
+            if not previous.findall(f".//{A_NS}blip"):
+                continue
+            extent = previous.find(f".//{WP_NS}extent")
+            if extent is None:
+                raise RuntimeError(f"cannot locate image display extent for {caption}")
+            cx = int(extent.get("cx") or "0")
+            cy = int(extent.get("cy") or "0")
+            extents[caption] = (cx, cy)
+            break
+
+    missing = sorted(set(ENGINEERING_FIGURES) - set(extents))
+    if missing:
+        raise RuntimeError(f"cannot locate engineering figure display extents before captions: {missing}")
+    return extents
+
+
+def verify_engineering_figure_assets(docx_path: Path) -> dict[str, str]:
+    figure_assets = prepare_engineering_figure_assets(docx_path)
+    media_targets = engineering_figure_media_targets(docx_path)
+    display_extents = engineering_figure_display_extents(docx_path)
+    with ZipFile(docx_path) as archive:
+        for caption, asset_path in figure_assets.items():
             media_name = media_targets[caption]
             actual = sha256(archive.read(media_name))
             expected = sha256(asset_path.read_bytes())
             if actual != expected:
                 raise RuntimeError(
                     f"engineering figure asset mismatch for {caption}: "
-                    f"{media_name}={actual}, source={expected}"
+                    f"{media_name}={actual}, rendered_source={expected}"
+                )
+            _cx, cy = display_extents[caption]
+            if cy < ENGINEERING_MIN_IMAGE_HEIGHT_EMU:
+                raise RuntimeError(
+                    f"engineering figure is too small on page for {caption}: "
+                    f"height_emu={cy}, expected>={ENGINEERING_MIN_IMAGE_HEIGHT_EMU}"
                 )
     return media_targets
 
@@ -525,7 +612,7 @@ def remove_engineering_evidence_caption(name: str, data: bytes) -> tuple[bytes, 
     changed = False
     for text_node in root.findall(f".//{W_NS}t"):
         text = text_node.text or ""
-        patched = text.replace("图3.2 系统原理与模块关系图", "图3.2 系统硬件连接与接口关系图")
+        patched = text.replace("图3.2 系统原理图", "图3.2 系统硬件连接与接口关系图")
         if patched != text:
             text_node.text = patched
             changed = True
@@ -627,7 +714,7 @@ def step_unit_contracts() -> str:
     evidence_chain = readability.get("engineering_evidence_chain", {})
     if not evidence_chain.get("enabled"):
         raise RuntimeError("engineering evidence chain rule is not enabled")
-    for caption in ["图3.2 系统原理与模块关系图", "图3.3 STM32主控接口分配图"]:
+    for caption in ENGINEERING_FIGURES:
         if caption not in evidence_chain.get("required_captions", []):
             raise RuntimeError(f"engineering evidence chain missing required caption: {caption}")
 
@@ -895,6 +982,15 @@ def step_forbidden_terms_contract() -> str:
     return "forbidden prose terms absent"
 
 
+def step_bridge_paragraph_contract() -> str:
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from delivery import build_lgp_docx
+
+    build_lgp_docx.verify_bridge_paragraphs_once(require_active_docx())
+    return "generated bridge paragraphs present exactly once"
+
+
 def step_image_table_contract() -> str:
     source_docx = require_active_source_docx()
     active_docx = require_active_docx()
@@ -982,6 +1078,7 @@ def main() -> int:
         ("header-contract", step_header_contract),
         ("font-contract", step_font_contract),
         ("forbidden-terms", step_forbidden_terms_contract),
+        ("bridge-paragraph-contract", step_bridge_paragraph_contract),
         ("image-table-contract", step_image_table_contract),
         ("regression-v011-color-rule", step_regression_v011_color_rule),
         ("visual-audit", step_visual_audit),
