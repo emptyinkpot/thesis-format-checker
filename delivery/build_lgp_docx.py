@@ -13,6 +13,9 @@ inconsistencies that the school-rule checker does not fully cover:
 from __future__ import annotations
 
 import json
+import hashlib
+import os
+import posixpath
 import sys
 import re
 import shutil
@@ -66,9 +69,22 @@ VERSION_LOG = DOWNLOADS / f"{DOCX_STEM}_版本记录.md"
 EXPECTED_HEADER = "华北水利水电大学毕业设计"
 COVER_TEMPLATE = DOWNLOADS / "202213210刘高朋_文献综述_标准模板版.docx"
 COVER_TITLE = "毕业设计（论文）"
+ENGINEERING_ASSET_ROOT = Path(r"E:/My Project/KiCad/_workspace/projects/STM32_CO2/thesis-build/assets")
+ENGINEERING_FIGURES = {
+    "图3.2 系统原理与模块关系图": ENGINEERING_ASSET_ROOT / "figure_01_system_principle_schematic.png",
+    "图3.3 STM32主控接口分配图": ENGINEERING_ASSET_ROOT / "figure_02_pre_bluepill_schematic.png",
+}
+ENGINEERING_CAPTION_RENAMES = {
+    "图3.2 系统硬件连接与接口关系图": "图3.2 系统原理与模块关系图",
+    "图3.3 传感、显示与通信接口分配图": "图3.3 STM32主控接口分配图",
+}
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-NS = {"w": W_NS}
+R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+NS = {"w": W_NS, "r": R_NS, "a": A_NS, "wp": WP_NS, "rel": REL_NS}
 
 FORBIDDEN_TERMS = [
     "代码截图",
@@ -106,7 +122,8 @@ BRIDGE_PARAGRAPHS = {
         "因此，第2章在结构上承担了承前启后的作用：它把第1章提出的监测需求转化为可以落地的模块分工，也为后续硬件接口、程序流程、功能页面和测试项目提供了同一套解释框架。这样安排后，后文各章不再是分散介绍，而是围绕同一条数据链路逐步展开。"
     ],
     "图3.1按“左侧实物、右侧说明”的方式介绍主要硬件模块": [
-        "这张图不是单独展示器件外观，而是作为第3章的模块索引：左侧实物帮助读者先识别SCD41、STM32、OLED、ESP8266和报警器件，右侧说明再对应到接口连接、源码文件和后续测试项目。这样处理后，实物、接口、源码和测试能够落在同一条说明链路上。"
+        "这张图不是单独展示器件外观，而是作为第3章的模块索引：左侧实物帮助读者先识别SCD41、STM32、OLED、ESP8266和报警器件，右侧说明再对应到接口连接、原理图、PCB、固件源码和后续测试项目。这样处理后，实物、原理图、接口、PCB、源码和测试能够落在同一条说明链路上。",
+        "图3.2和图3.3继续把该索引落到工程图纸上。图3.2对应系统原理图，说明供电、传感、显示、通信、报警和调试接口之间的模块关系；图3.3对应STM32主控接口原理图，说明PB10/PB12、PB6/PB7、PA9/PA10、PA0、PB4/PB11等引脚怎样连接到SCD41、OLED、ESP8266、蜂鸣器和LED。PCB布线、ERC/DRC检查和固件文件main.c、scd41.c、bsp_pins.h、第6章测试验证一起构成后续说明依据。"
     ],
     "传感器采集功能对应硬件SCD41和软件scd41.c": [
         "图5.2用于说明采集代码和显示刷新之间的衔接关系。读图时应先看SCD41读取结果怎样进入主程序状态，再看OLED刷新和报警判断怎样使用同一组有效采样值。"
@@ -134,6 +151,11 @@ BRIDGE_PARAGRAPHS = {
         "该结果说明，样机在毕业设计阶段更适合用于趋势监测和阈值提示，而不是作为计量级检测仪器。后续若要用于长期部署，还需要结合标准气体或校准设备进行周期校准，并在不同温湿度条件下重新记录误差范围。"
     ],
 }
+
+SUPERSEDED_PARAGRAPH_PREFIXES = [
+    "这张图不是单独展示器件外观，而是作为第3章的模块索引：左侧实物帮助读者先识别",
+    "图3.2和图3.3继续把该索引落到工程图纸上。",
+]
 
 
 def normalize_text(text: str) -> str:
@@ -205,6 +227,13 @@ def set_xml_size(rpr, size_pt: float) -> None:
         elem.set(qn("w:val"), half_points)
 
 
+def remove_xml_italic(rpr) -> None:
+    for tag in ("w:i", "w:iCs"):
+        elem = rpr.find(qn(tag))
+        if elem is not None:
+            rpr.remove(elem)
+
+
 def set_run_visual(run, east_asia: str, latin: str, size_pt: float | None, bold: bool | None = None) -> None:
     rpr = run._element.get_or_add_rPr()
     set_xml_color_black(rpr)
@@ -253,6 +282,12 @@ def paragraph_kind(paragraph) -> tuple[str, str, float, bool | None]:
     return "宋体", "Times New Roman", 12, None
 
 
+def is_caption_paragraph(paragraph) -> bool:
+    return paragraph.text.strip().startswith(("图", "表")) or (
+        paragraph.style is not None and paragraph.style.name.lower() == "caption"
+    )
+
+
 def tighten_reference_paragraph(paragraph) -> None:
     text = paragraph.text.strip()
     if not re.match(r"^\[\d+\]", text):
@@ -262,6 +297,13 @@ def tighten_reference_paragraph(paragraph) -> None:
     fmt.space_after = Pt(0)
     fmt.line_spacing = 0.92
     fmt.first_line_indent = None
+
+
+def remove_superseded_paragraphs(doc: Document) -> None:
+    for paragraph in list(doc.paragraphs):
+        text = paragraph.text.strip()
+        if any(text.startswith(prefix) for prefix in SUPERSEDED_PARAGRAPH_PREFIXES):
+            paragraph._element.getparent().remove(paragraph._element)
 
 
 def make_body_paragraph(doc: Document, text: str) -> OxmlElement:
@@ -312,6 +354,192 @@ def replace_paragraph_text(paragraph, text: str):
     for run in list(paragraph.runs):
         paragraph._element.remove(run._element)
     return paragraph.add_run(text)
+
+
+def rename_engineering_captions(doc: Document) -> None:
+    for paragraph in doc.paragraphs:
+        text = paragraph.text.strip()
+        replacement = ENGINEERING_CAPTION_RENAMES.get(text)
+        if replacement:
+            run = replace_paragraph_text(paragraph, replacement)
+            set_run_visual(run, "宋体", "Times New Roman", 10.5, False)
+            run.italic = False
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+
+def normalize_caption_run(run) -> None:
+    run.italic = False
+    run.font.italic = False
+    remove_xml_italic(run._element.get_or_add_rPr())
+
+
+def normalize_caption_style(doc: Document) -> None:
+    for style_name in ("Caption", "caption"):
+        if style_name not in doc.styles:
+            continue
+        style = doc.styles[style_name]
+        style.font.name = "Times New Roman"
+        style.font.size = Pt(10.5)
+        style.font.bold = False
+        style.font.italic = False
+        style.font.color.rgb = RGBColor(0, 0, 0)
+        rpr = style.element.get_or_add_rPr()
+        set_xml_fonts(rpr, "宋体", "Times New Roman")
+        set_xml_size(rpr, 10.5)
+        remove_xml_italic(rpr)
+
+
+def _image_size(path: Path) -> tuple[int, int]:
+    from PIL import Image
+
+    with Image.open(path) as image:
+        return image.size
+
+
+def _target_zip_name(target: str) -> str:
+    if target.startswith("/"):
+        return posixpath.normpath(target.lstrip("/"))
+    return posixpath.normpath(posixpath.join("word", target))
+
+
+def _caption_text(paragraph) -> str:
+    return "".join(paragraph.xpath(".//w:t/text()", namespaces=NS)).strip()
+
+
+def _caption_previous_blips(document_root) -> dict[str, list[tuple[str, object]]]:
+    body = document_root.find("w:body", namespaces=NS)
+    if body is None:
+        return {}
+    paragraphs = [child for child in body if child.tag == f"{{{W_NS}}}p"]
+    out: dict[str, list[tuple[str, object]]] = {}
+    for index, paragraph in enumerate(paragraphs):
+        caption = _caption_text(paragraph)
+        if caption not in ENGINEERING_FIGURES:
+            continue
+        for prev in reversed(paragraphs[max(0, index - 4):index]):
+            blips = []
+            for blip in prev.xpath(".//a:blip", namespaces=NS):
+                rid = blip.get(f"{{{R_NS}}}embed")
+                if rid:
+                    blips.append((rid, blip))
+            if blips:
+                out[caption] = blips
+                break
+    return out
+
+
+def _set_inline_image_aspect(blip, image_path: Path) -> None:
+    inline = blip
+    while inline is not None and inline.tag != f"{{{WP_NS}}}inline":
+        inline = inline.getparent()
+    if inline is None:
+        return
+    extent = inline.find("wp:extent", namespaces=NS)
+    if extent is None:
+        return
+    cx = int(extent.get("cx") or "0")
+    width_px, height_px = _image_size(image_path)
+    if cx <= 0 or width_px <= 0:
+        return
+    cy = int(round(cx * height_px / width_px))
+    extent.set("cy", str(cy))
+    pic_extents = inline.xpath(".//a:xfrm/a:ext", namespaces=NS)
+    for pic_extent in pic_extents:
+        pic_extent.set("cx", str(cx))
+        pic_extent.set("cy", str(cy))
+
+
+def replace_engineering_figure_media() -> None:
+    for caption, figure in ENGINEERING_FIGURES.items():
+        if not figure.exists():
+            raise FileNotFoundError(f"engineering figure missing for {caption}: {figure}")
+
+    tmp = OUT.with_suffix(".figures.tmp.docx")
+    replaced: set[str] = set()
+    with ZipFile(OUT, "r") as zin:
+        document_root = etree.fromstring(zin.read("word/document.xml"))
+        rels_root = etree.fromstring(zin.read("word/_rels/document.xml.rels"))
+        rid_to_target = {
+            rel.get("Id"): rel.get("Target")
+            for rel in rels_root.xpath(".//rel:Relationship", namespaces=NS)
+        }
+        caption_blips = _caption_previous_blips(document_root)
+        media_replacements: dict[str, bytes] = {}
+        for caption, figure in ENGINEERING_FIGURES.items():
+            blips = caption_blips.get(caption)
+            if not blips:
+                raise RuntimeError(f"cannot locate image before caption: {caption}")
+            rid, blip = blips[0]
+            target = rid_to_target.get(rid)
+            if not target:
+                raise RuntimeError(f"cannot resolve image relationship {rid} for {caption}")
+            media_replacements[_target_zip_name(target)] = figure.read_bytes()
+            _set_inline_image_aspect(blip, figure)
+            replaced.add(caption)
+
+        if replaced != set(ENGINEERING_FIGURES):
+            raise RuntimeError(f"not all engineering figures replaced: {sorted(replaced)}")
+
+        patched_document = etree.tostring(document_root, xml_declaration=True, encoding="UTF-8", standalone=True)
+        with ZipFile(tmp, "w", ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                data = zin.read(item.filename)
+                if item.filename == "word/document.xml":
+                    data = patched_document
+                elif item.filename in media_replacements:
+                    data = media_replacements[item.filename]
+                zout.writestr(item, data)
+    tmp.replace(OUT)
+
+
+def _engineering_figure_media_targets(docx_path: Path) -> dict[str, str]:
+    with ZipFile(docx_path, "r") as archive:
+        document_root = etree.fromstring(archive.read("word/document.xml"))
+        rels_root = etree.fromstring(archive.read("word/_rels/document.xml.rels"))
+        rid_to_target = {
+            rel.get("Id"): rel.get("Target")
+            for rel in rels_root.xpath(".//rel:Relationship", namespaces=NS)
+        }
+        caption_blips = _caption_previous_blips(document_root)
+
+    targets: dict[str, str] = {}
+    for caption in ENGINEERING_FIGURES:
+        blips = caption_blips.get(caption)
+        if not blips:
+            raise RuntimeError(f"cannot locate image before caption: {caption}")
+        rid, _blip = blips[0]
+        target = rid_to_target.get(rid)
+        if not target:
+            raise RuntimeError(f"cannot resolve image relationship {rid} for {caption}")
+        targets[caption] = _target_zip_name(target)
+    return targets
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def verify_engineering_figure_assets(docx_path: Path | None = None) -> dict[str, str]:
+    """Verify that required engineering captions point to the real source assets."""
+    target_docx = docx_path or OUT
+    for caption, figure in ENGINEERING_FIGURES.items():
+        if not figure.exists():
+            raise FileNotFoundError(f"engineering figure missing for {caption}: {figure}")
+
+    media_targets = _engineering_figure_media_targets(target_docx)
+    with ZipFile(target_docx, "r") as archive:
+        for caption, figure in ENGINEERING_FIGURES.items():
+            media_name = media_targets.get(caption)
+            if not media_name:
+                raise RuntimeError(f"engineering figure media target missing for {caption}")
+            actual_hash = _sha256(archive.read(media_name))
+            expected_hash = _sha256(figure.read_bytes())
+            if actual_hash != expected_hash:
+                raise RuntimeError(
+                    f"engineering figure mismatch for {caption}: "
+                    f"{media_name} sha256={actual_hash}, expected={expected_hash}"
+                )
+    return media_targets
 
 
 def set_cover_paragraph(paragraph, text: str, alignment, east_asia: str, latin: str, size_pt: float, bold: bool | None) -> None:
@@ -375,7 +603,10 @@ def normalize_docx_with_python_docx() -> None:
     shutil.copy2(SRC, OUT)
     doc = Document(str(OUT))
 
+    remove_superseded_paragraphs(doc)
     insert_bridge_paragraphs(doc)
+    rename_engineering_captions(doc)
+    normalize_caption_style(doc)
 
     for style in doc.styles:
         if not hasattr(style, "font"):
@@ -407,6 +638,8 @@ def normalize_docx_with_python_docx() -> None:
                 vert.set(qn("w:val"), "superscript")
                 continue
             set_run_visual(run, east_asia, latin, size_pt, bold)
+            if is_caption_paragraph(paragraph):
+                normalize_caption_run(run)
 
     for table in doc.tables:
         for row in table.rows:
@@ -416,9 +649,12 @@ def normalize_docx_with_python_docx() -> None:
                     for run in paragraph.runs:
                         if run.text:
                             set_run_visual(run, east_asia, latin, size_pt, bold)
+                            if is_caption_paragraph(paragraph):
+                                normalize_caption_run(run)
 
     restore_cover_template_style(doc)
     doc.save(str(OUT))
+    replace_engineering_figure_media()
 
 
 def patch_xml_colors_and_styles() -> None:
@@ -481,6 +717,9 @@ def patch_styles_xml(root) -> bool:
             set_xml_size(rpr, 10.5)
         elif lower_name in {"normal", "body text", "caption"} or name in {"Normal", "Body Text", "caption"}:
             set_xml_fonts(rpr, "宋体", "Times New Roman")
+        if lower_name == "caption" or name == "caption":
+            set_xml_size(rpr, 10.5)
+            remove_xml_italic(rpr)
         changed = True
     return changed
 
@@ -507,11 +746,14 @@ def export_pdf() -> None:
 
 
 def run_checker() -> None:
-    env = dict(__import__("os").environ)
+    env = dict(os.environ)
     env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONPATH"] = f"{ROOT}{os.pathsep}{ROOT / 'src'}{os.pathsep}{env.get('PYTHONPATH', '')}"
     subprocess.run(
         [
-            r"C:/Users/ASUS-KL/AppData/Roaming/Python/Python313/Scripts/thesis-check.exe",
+            sys.executable,
+            "-m",
+            "thesis_format_checker.cli",
             "check",
             str(OUT),
             "--preset",
@@ -849,6 +1091,7 @@ def main() -> None:
     verify_font_contract()
     verify_forbidden_terms()
     verify_image_table_count()
+    verify_engineering_figure_assets()
     blank_suspects = scan_pdf_blank_space()
     audit = audit_visual_format()
     verify_delivery_contract()

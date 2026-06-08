@@ -53,6 +53,7 @@ styles:
     east_asia: 宋体
     size_pt: 10.5
     align: center
+    italic: false
 
 content:
   abstract_zh:
@@ -99,9 +100,27 @@ readability:
   module_block:
     enabled: true
     required_lead_terms: ["左侧实物", "右侧说明"]
-    required_chain_terms: ["实物", "接口", "源码", "测试"]
+    required_chain_terms: ["实物", "原理图", "接口", "PCB", "源码", "测试"]
     target_captions:
       - "图3.1 主要硬件模块实物图"
+  engineering_evidence_chain:
+    enabled: true
+    chapter_prefix: "第3章"
+    required_captions:
+      - "图3.1 主要硬件模块实物图"
+      - "图3.2 系统原理与模块关系图"
+      - "图3.3 STM32主控接口分配图"
+    required_term_groups:
+      - name: "module-photo"
+        any_of: ["左侧实物", "主要硬件模块", "实物模块"]
+      - name: "schematic"
+        any_of: ["系统原理图", "原理图", "模块关系"]
+      - name: "interface-pcb"
+        any_of: ["接口原理图", "PCB", "DRC", "ERC", "布线"]
+      - name: "firmware-source"
+        any_of: ["固件源码", "main.c", "scd41.c", "bsp_pins.h", "OneNet_Publish"]
+      - name: "test-validation"
+        any_of: ["测试验证", "调试记录", "验收指标", "第6章测试"]
 
 # 规则开关：可单独 enable/disable + 调严重度
 # severity: error | warning | info
@@ -212,6 +231,12 @@ rules:
     severity: warning
     enabled: true
   - id: module-visual-block
+    severity: warning
+    enabled: true
+  - id: caption-not-italic
+    severity: warning
+    enabled: true
+  - id: engineering-evidence-chain
     severity: warning
     enabled: true
   - id: table-caption-position

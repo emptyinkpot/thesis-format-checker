@@ -1006,6 +1006,109 @@ def check_module_visual_block(docx, content, preset) -> list[Finding]:
     return findings
 
 
+@rule("caption-not-italic", default_severity="warning")
+def check_caption_not_italic(docx, content, preset) -> list[Finding]:
+    """图题、表题不应继承斜体样式，避免题注看起来像临时标注。"""
+    cfg = preset.get("styles", {}).get("caption", {})
+    if cfg.get("italic", False) is not False:
+        return []
+
+    findings = []
+    for style_name in ("Caption", "caption"):
+        style = docx.styles.get(style_name)
+        if style is not None and getattr(style, "italic", None) is True:
+            findings.append(Finding(
+                rule_id="caption-not-italic",
+                message=f"{style_name} 样式被设置为斜体，图表题应为常规字形",
+                expected="italic=False",
+                actual="italic=True",
+                location=f"Style: {style_name}",
+                fixable=True,
+            ))
+
+    for paragraph in docx.paragraphs:
+        text = paragraph.text.strip()
+        if not (_standard_figure_caption(text) or _standard_table_caption(text)):
+            continue
+        style = docx.styles.get(paragraph.style_name)
+        style_italic = getattr(style, "italic", None) if style is not None else None
+        if paragraph.first_run_italic is True or style_italic is True:
+            findings.append(Finding(
+                rule_id="caption-not-italic",
+                message=f"图表题 {text[:30]!r} 存在斜体格式",
+                expected="caption style/run italic=False",
+                actual={"style": paragraph.style_name, "style_italic": style_italic, "run_italic": paragraph.first_run_italic},
+                location=f"Paragraph {paragraph.index}",
+                fixable=True,
+            ))
+            if len(findings) >= 8:
+                break
+    return findings
+
+
+def _chapter_paragraphs(docx, chapter_prefix: str) -> list:
+    paragraphs = []
+    in_chapter = False
+    for paragraph in docx.paragraphs:
+        text = paragraph.text.strip()
+        if text.startswith(chapter_prefix):
+            in_chapter = True
+        elif in_chapter and CHAPTER_TEXT_RE.match(text):
+            break
+        if in_chapter:
+            paragraphs.append(paragraph)
+    return paragraphs
+
+
+@rule("engineering-evidence-chain", default_severity="warning")
+def check_engineering_evidence_chain(docx, content, preset) -> list[Finding]:
+    """硬件章节应把实物、原理图、PCB/接口、固件源码和测试验证连成证据链。"""
+    cfg = preset.get("readability", {}).get("engineering_evidence_chain", {})
+    if not cfg.get("enabled", False):
+        return []
+
+    chapter_prefix = cfg.get("chapter_prefix", "第3章")
+    paragraphs = _chapter_paragraphs(docx, chapter_prefix)
+    if not paragraphs:
+        return [Finding(
+            rule_id="engineering-evidence-chain",
+            message=f"未找到工程证据链目标章节 {chapter_prefix}",
+            expected=chapter_prefix,
+            actual="missing",
+            location="正文",
+            fixable=False,
+        )]
+
+    chapter_text = "\n".join(p.text for p in paragraphs)
+    compact = _compact_text(chapter_text)
+    findings = []
+
+    missing_captions = [
+        caption for caption in cfg.get("required_captions", [])
+        if _compact_text(caption) not in compact
+    ]
+    missing_groups = []
+    for group in cfg.get("required_term_groups", []):
+        name = group.get("name", "unnamed")
+        terms = group.get("any_of", [])
+        if terms and not any(_compact_text(term) in compact for term in terms):
+            missing_groups.append({"name": name, "any_of": terms})
+
+    if missing_captions or missing_groups:
+        findings.append(Finding(
+            rule_id="engineering-evidence-chain",
+            message=(
+                f"{chapter_prefix} 工程证据链不完整：缺少图题 {missing_captions}，"
+                f"缺少证据组 {[group['name'] for group in missing_groups]}"
+            ),
+            expected={"captions": cfg.get("required_captions", []), "term_groups": cfg.get("required_term_groups", [])},
+            actual={"missing_captions": missing_captions, "missing_groups": missing_groups},
+            location=chapter_prefix,
+            fixable=False,
+        ))
+    return findings
+
+
 @rule("figure-caption-position", default_severity="warning")
 def check_figure_caption_position(docx, content, preset) -> list[Finding]:
     """图题应在图下方（即图片段落之后）。"""

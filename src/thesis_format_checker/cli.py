@@ -112,3 +112,7 @@ def inspect_command(docx_path):
         "content": {k: v for k, v in content_result.to_dict().items() if k != "full_text"},
     }
     click.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
+if __name__ == "__main__":
+    main()

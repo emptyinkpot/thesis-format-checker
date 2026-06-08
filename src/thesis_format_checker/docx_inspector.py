@@ -28,6 +28,7 @@ class StyleInfo:
     latin: str | None = None
     size_pt: float | None = None
     bold: bool | None = None
+    italic: bool | None = None
     align: str | None = None
     line_spacing: float | None = None
     first_line_indent_twips: int | None = None
@@ -80,6 +81,7 @@ class ParagraphInfo:
     first_run_latin: str | None
     first_run_size_pt: float | None
     first_run_bold: bool | None
+    first_run_italic: bool | None
     inline_ref_count: int = 0
     inline_ref_not_superscript_count: int = 0
 
@@ -124,13 +126,14 @@ def _emu_to_cm(emu: int | None) -> float:
     return round(emu / EMU_PER_CM, 3)
 
 
-def _extract_font_from_rpr(rpr) -> tuple[str | None, str | None, float | None, bool | None]:
+def _extract_font_from_rpr(rpr) -> tuple[str | None, str | None, float | None, bool | None, bool | None]:
     if rpr is None:
-        return None, None, None, None
+        return None, None, None, None, None
     east_asia = None
     latin = None
     size_pt = None
     bold = None
+    italic = None
     rfonts = rpr.find(qn("w:rFonts"))
     if rfonts is not None:
         east_asia = rfonts.get(qn("w:eastAsia"))
@@ -144,7 +147,11 @@ def _extract_font_from_rpr(rpr) -> tuple[str | None, str | None, float | None, b
     if b is not None:
         val = b.get(qn("w:val"))
         bold = val != "0" and val != "false"
-    return east_asia, latin, size_pt, bold
+    i = rpr.find(qn("w:i"))
+    if i is not None:
+        val = i.get(qn("w:val"))
+        italic = val != "0" and val != "false"
+    return east_asia, latin, size_pt, bold, italic
 
 
 def _extract_color_from_rpr(rpr) -> tuple[str | None, str | None]:
@@ -259,7 +266,7 @@ def _first_text_run_size_pt(paragraph) -> float | None:
         if not (run.text or "").strip():
             continue
         rpr = run._r.find(qn("w:rPr"))
-        _ea, _latin, size_pt, _bold = _extract_font_from_rpr(rpr)
+        _ea, _latin, size_pt, _bold, _italic = _extract_font_from_rpr(rpr)
         return size_pt
     return None
 
@@ -323,7 +330,7 @@ def _extract_styles(doc) -> dict[str, StyleInfo]:
             continue
         rpr = element.find(qn("w:rPr"))
         ppr = element.find(qn("w:pPr"))
-        ea, latin, size_pt, bold = _extract_font_from_rpr(rpr)
+        ea, latin, size_pt, bold, italic = _extract_font_from_rpr(rpr)
         color, theme_color = _extract_color_from_rpr(rpr)
         align = _extract_alignment(ppr)
         line_sp = _extract_line_spacing(ppr)
@@ -341,6 +348,7 @@ def _extract_styles(doc) -> dict[str, StyleInfo]:
             latin=latin,
             size_pt=size_pt,
             bold=bold,
+            italic=italic,
             align=align,
             line_spacing=line_sp,
             first_line_indent_twips=first_line_indent,
@@ -464,6 +472,7 @@ def _extract_paragraphs(doc, paragraph_blocks: list[int | None]) -> list[Paragra
         has_page_break_run = False
         ea = latin = size_pt = None
         bold = None
+        italic = None
         inline_ref_count = 0
         inline_ref_not_superscript_count = 0
         for run in p.runs:
@@ -475,7 +484,7 @@ def _extract_paragraphs(doc, paragraph_blocks: list[int | None]) -> list[Paragra
             if refs:
                 inline_ref_count += len(refs)
                 rpr = run._r.find(qn("w:rPr"))
-                _ea, _latin, ref_size_pt, _bold = _extract_font_from_rpr(rpr)
+                _ea, _latin, ref_size_pt, _bold, _italic = _extract_font_from_rpr(rpr)
                 is_superscript = False
                 if rpr is not None:
                     vert = rpr.find(qn("w:vertAlign"))
@@ -487,8 +496,8 @@ def _extract_paragraphs(doc, paragraph_blocks: list[int | None]) -> list[Paragra
                     inline_ref_not_superscript_count += len(refs)
             if ea is None and run.text.strip():
                 rpr = run._r.find(qn("w:rPr"))
-                ea, latin, size_pt, bold = _extract_font_from_rpr(rpr)
-                if ea is not None or latin is not None or size_pt is not None or bold is not None:
+                ea, latin, size_pt, bold, italic = _extract_font_from_rpr(rpr)
+                if ea is not None or latin is not None or size_pt is not None or bold is not None or italic is not None:
                     break
         paragraphs.append(ParagraphInfo(
             index=i,
@@ -505,6 +514,7 @@ def _extract_paragraphs(doc, paragraph_blocks: list[int | None]) -> list[Paragra
             first_run_latin=latin,
             first_run_size_pt=size_pt,
             first_run_bold=bold,
+            first_run_italic=italic,
             inline_ref_count=inline_ref_count,
             inline_ref_not_superscript_count=inline_ref_not_superscript_count,
         ))

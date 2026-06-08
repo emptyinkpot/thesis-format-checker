@@ -18,9 +18,11 @@ What it covers:
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -47,7 +49,12 @@ COVER_TEMPLATE = DOWNLOADS / "202213210刘高朋_文献综述_标准模板版.do
 COVER_TITLE = "毕业设计（论文）"
 W_URI = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 R_URI = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+A_URI = "http://schemas.openxmlformats.org/drawingml/2006/main"
+RELS_URI = "http://schemas.openxmlformats.org/package/2006/relationships"
 W_NS = f"{{{W_URI}}}"
+R_NS = f"{{{R_URI}}}"
+A_NS = f"{{{A_URI}}}"
+RELS_NS = f"{{{RELS_URI}}}"
 
 ET.register_namespace("w", W_URI)
 ET.register_namespace("r", R_URI)
@@ -82,6 +89,11 @@ COVER_TABLE_ROWS = [
     ("完成时间", "2026年6月"),
 ]
 BODY_MUTATION_ANCHOR = "本章回答本设计为什么需要开展"
+ENGINEERING_ASSET_ROOT = Path(r"E:/My Project/KiCad/_workspace/projects/STM32_CO2/thesis-build/assets")
+ENGINEERING_FIGURES = {
+    "图3.2 系统原理与模块关系图": ENGINEERING_ASSET_ROOT / "figure_01_system_principle_schematic.png",
+    "图3.3 STM32主控接口分配图": ENGINEERING_ASSET_ROOT / "figure_02_pre_bluepill_schematic.png",
+}
 
 
 @dataclass
@@ -160,6 +172,75 @@ def document_text(path: Path) -> str:
             for cell in row.cells:
                 parts.extend(paragraph.text for paragraph in cell.paragraphs)
     return "\n".join(parts)
+
+
+def sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def docx_target_zip_name(target: str) -> str:
+    if target.startswith("/"):
+        return posixpath.normpath(target.lstrip("/"))
+    return posixpath.normpath(posixpath.join("word", target))
+
+
+def xml_paragraph_text(paragraph: ET.Element) -> str:
+    return "".join(node.text or "" for node in paragraph.findall(f".//{W_NS}t")).strip()
+
+
+def engineering_figure_media_targets(docx_path: Path) -> dict[str, str]:
+    with ZipFile(docx_path) as archive:
+        document_root = ET.fromstring(archive.read("word/document.xml"))
+        rels_root = ET.fromstring(archive.read("word/_rels/document.xml.rels"))
+
+    rid_to_target = {
+        rel.get("Id"): rel.get("Target")
+        for rel in rels_root.findall(f".//{RELS_NS}Relationship")
+    }
+    body = document_root.find(f"{W_NS}body")
+    if body is None:
+        raise RuntimeError("DOCX document body missing")
+
+    paragraphs = [child for child in body if child.tag == f"{W_NS}p"]
+    media_targets: dict[str, str] = {}
+    for index, paragraph in enumerate(paragraphs):
+        caption = xml_paragraph_text(paragraph)
+        if caption not in ENGINEERING_FIGURES:
+            continue
+        for previous in reversed(paragraphs[max(0, index - 4):index]):
+            blips = previous.findall(f".//{A_NS}blip")
+            if not blips:
+                continue
+            rid = blips[0].get(f"{R_NS}embed")
+            target = rid_to_target.get(rid)
+            if not target:
+                raise RuntimeError(f"cannot resolve image relationship {rid} for {caption}")
+            media_targets[caption] = docx_target_zip_name(target)
+            break
+
+    missing = sorted(set(ENGINEERING_FIGURES) - set(media_targets))
+    if missing:
+        raise RuntimeError(f"cannot locate engineering figure media before captions: {missing}")
+    return media_targets
+
+
+def verify_engineering_figure_assets(docx_path: Path) -> dict[str, str]:
+    missing_assets = [str(path) for path in ENGINEERING_FIGURES.values() if not path.exists()]
+    if missing_assets:
+        raise RuntimeError(f"engineering source assets missing: {missing_assets}")
+
+    media_targets = engineering_figure_media_targets(docx_path)
+    with ZipFile(docx_path) as archive:
+        for caption, asset_path in ENGINEERING_FIGURES.items():
+            media_name = media_targets[caption]
+            actual = sha256(archive.read(media_name))
+            expected = sha256(asset_path.read_bytes())
+            if actual != expected:
+                raise RuntimeError(
+                    f"engineering figure asset mismatch for {caption}: "
+                    f"{media_name}={actual}, source={expected}"
+                )
+    return media_targets
 
 
 def iter_direct_run_fonts(path: Path):
@@ -415,6 +496,42 @@ def remove_module_visual_lead_text(name: str, data: bytes) -> tuple[bytes, bool]
     return (xml_bytes(root), True) if changed else (data, False)
 
 
+def set_caption_style_italic(name: str, data: bytes) -> tuple[bytes, bool]:
+    if name != "word/styles.xml":
+        return data, False
+    root = ET.fromstring(data)
+    changed = False
+    for style in root.findall(f".//{W_NS}style"):
+        style_id = style.get(f"{W_NS}styleId") or ""
+        name_el = style.find(f"{W_NS}name")
+        style_name = name_el.get(f"{W_NS}val") if name_el is not None else ""
+        if style_id.lower() != "caption" and style_name.lower() != "caption":
+            continue
+        rpr = style.find(f"{W_NS}rPr")
+        if rpr is None:
+            rpr = ET.SubElement(style, f"{W_NS}rPr")
+        italic = rpr.find(f"{W_NS}i")
+        if italic is None:
+            italic = ET.SubElement(rpr, f"{W_NS}i")
+        italic.set(f"{W_NS}val", "1")
+        changed = True
+    return (xml_bytes(root), True) if changed else (data, False)
+
+
+def remove_engineering_evidence_caption(name: str, data: bytes) -> tuple[bytes, bool]:
+    if name != "word/document.xml":
+        return data, False
+    root = ET.fromstring(data)
+    changed = False
+    for text_node in root.findall(f".//{W_NS}t"):
+        text = text_node.text or ""
+        patched = text.replace("图3.2 系统原理与模块关系图", "图3.2 系统硬件连接与接口关系图")
+        if patched != text:
+            text_node.text = patched
+            changed = True
+    return (xml_bytes(root), True) if changed else (data, False)
+
+
 def remove_table_cant_split(name: str, data: bytes) -> tuple[bytes, bool]:
     if name != "word/document.xml":
         return data, False
@@ -491,6 +608,8 @@ def step_unit_contracts() -> str:
         "figure-followup-text",
         "figure-text-balance",
         "module-visual-block",
+        "caption-not-italic",
+        "engineering-evidence-chain",
     }
     missing_standard_rules = expected_standard_rules - enabled_preset_rules
     if missing_standard_rules:
@@ -503,6 +622,14 @@ def step_unit_contracts() -> str:
         raise RuntimeError("module visual block rule is not enabled")
     if "图3.1 主要硬件模块实物图" not in module_block.get("target_captions", []):
         raise RuntimeError("module visual block target caption is missing")
+    if preset.get("styles", {}).get("caption", {}).get("italic") is not False:
+        raise RuntimeError("caption style contract must explicitly disable italic")
+    evidence_chain = readability.get("engineering_evidence_chain", {})
+    if not evidence_chain.get("enabled"):
+        raise RuntimeError("engineering evidence chain rule is not enabled")
+    for caption in ["图3.2 系统原理与模块关系图", "图3.3 STM32主控接口分配图"]:
+        if caption not in evidence_chain.get("required_captions", []):
+            raise RuntimeError(f"engineering evidence chain missing required caption: {caption}")
 
     return f"rule registry and preset contracts passed: enabled_rules={len(enabled_preset_rules)}"
 
@@ -530,6 +657,8 @@ def step_rule_regression_contracts() -> str:
         ("figure-followup-text", add_figure_caption_without_followup),
         ("figure-text-balance", add_unbalanced_figure_group),
         ("module-visual-block", remove_module_visual_lead_text),
+        ("caption-not-italic", set_caption_style_italic),
+        ("engineering-evidence-chain", remove_engineering_evidence_caption),
         ("table-caption-position", add_isolated_table_caption),
         ("table-no-page-break", remove_table_cant_split),
     ]
@@ -775,7 +904,11 @@ def step_image_table_contract() -> str:
         raise RuntimeError(f"inline image count decreased: source={len(before.inline_shapes)} output={len(after.inline_shapes)}")
     if len(after.tables) < len(before.tables):
         raise RuntimeError(f"table count decreased: source={len(before.tables)} output={len(after.tables)}")
-    return f"images/tables preserved: images={len(after.inline_shapes)}, tables={len(after.tables)}"
+    engineering_targets = verify_engineering_figure_assets(active_docx)
+    return (
+        f"images/tables preserved: images={len(after.inline_shapes)}, tables={len(after.tables)}; "
+        f"engineering figures verified={engineering_targets}"
+    )
 
 
 def step_regression_v011_color_rule() -> str:
