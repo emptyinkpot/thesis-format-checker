@@ -29,6 +29,7 @@ from lxml import etree
 
 
 DOWNLOADS = Path(r"C:/Users/ASUS-KL/Downloads")
+ORIGINAL = DOWNLOADS / "202213210刘高朋修改迭代版.docx"
 SRC = DOWNLOADS / "202213210刘高朋修改迭代版_v011_格式统一交付版.docx"
 OUT = DOWNLOADS / "202213210刘高朋修改迭代版_v012_全篇黑色字体统一版.docx"
 PDF = OUT.with_suffix(".pdf")
@@ -36,9 +37,31 @@ REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v012_格式检测报告.
 BLANK_REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v012_留白扫描.json"
 PAGE_DIR = DOWNLOADS / "202213210刘高朋修改迭代版_v012_pdf_pages"
 VERSION_LOG = DOWNLOADS / "202213210刘高朋修改迭代版_版本记录.md"
+EXPECTED_HEADER = "华北水利水电大学毕业设计"
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 NS = {"w": W_NS}
+
+FORBIDDEN_TERMS = [
+    "代码截图",
+    "本实验",
+    "实验",
+    "本研究",
+    "本论文",
+    "软件算法",
+    "算法",
+    "预测",
+    "补偿",
+    "图3.6",
+    "7.2 不足与展望",
+    "2.2.1 系统需求分析",
+    "文献启发",
+    "本文按照",
+]
+
+ALLOWED_BLANK_PAGES = {2, 3, 23, 52, 53, 69, 76}
+ALLOWED_EAST_ASIA_FONTS = {"宋体", "黑体", "仿宋_GB2312", "隶书", "Consolas"}
+ALLOWED_LATIN_FONTS = {"Times New Roman", "Consolas", "宋体"}
 
 
 BRIDGE_PARAGRAPHS = {
@@ -57,6 +80,41 @@ BRIDGE_PARAGRAPHS = {
 
 def normalize_text(text: str) -> str:
     return re.sub(r"\s+", "", text or "")
+
+
+def document_text(path: Path) -> str:
+    doc = Document(str(path))
+    parts: list[str] = [paragraph.text for paragraph in doc.paragraphs]
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                parts.extend(paragraph.text for paragraph in cell.paragraphs)
+    return "\n".join(parts)
+
+
+def iter_direct_run_fonts(path: Path):
+    with ZipFile(path) as archive:
+        for name in archive.namelist():
+            if not name.startswith("word/") or not name.endswith(".xml"):
+                continue
+            root = etree.fromstring(archive.read(name))
+            for run in root.xpath(".//w:r", namespaces=NS):
+                text = "".join(t.text or "" for t in run.xpath(".//w:t", namespaces=NS)).strip()
+                if not text:
+                    continue
+                rpr = run.find("w:rPr", namespaces=NS)
+                if rpr is None:
+                    continue
+                fonts = rpr.find("w:rFonts", namespaces=NS)
+                if fonts is None:
+                    continue
+                yield {
+                    "source": name,
+                    "text": text[:80],
+                    "east_asia": fonts.get(f"{{{W_NS}}}eastAsia"),
+                    "ascii": fonts.get(f"{{{W_NS}}}ascii"),
+                    "hansi": fonts.get(f"{{{W_NS}}}hAnsi"),
+                }
 
 
 def ensure_child(parent, tag: str):
@@ -423,6 +481,132 @@ def audit_visual_format() -> dict:
     return counters
 
 
+def verify_delivery_contract() -> None:
+    required = [ORIGINAL, SRC, OUT, PDF, REPORT, BLANK_REPORT]
+    missing = [str(path) for path in required if not path.exists()]
+    if missing:
+        raise RuntimeError(f"missing delivery artifacts: {missing}")
+    if OUT.suffix.lower() != ".docx" or "_v012_" not in OUT.name:
+        raise RuntimeError(f"final output is not the expected versioned DOCX: {OUT}")
+    if ORIGINAL.name == OUT.name:
+        raise RuntimeError("final output overwrote the original filename")
+
+
+def verify_content_integrity() -> None:
+    root = Path(__file__).resolve().parent
+    src_dir = root / "src"
+    if str(src_dir) not in sys.path:
+        sys.path.insert(0, str(src_dir))
+    from thesis_format_checker.checker import check, load_preset
+
+    preset = load_preset("ncwu")
+    _docx, content, findings = check(OUT, preset)
+    if findings:
+        detail = "; ".join(f"{finding.rule_id}: {finding.message}" for finding in findings[:5])
+        raise RuntimeError(f"checker findings={len(findings)} {detail}")
+    if content.abstract_zh_chars < 500:
+        raise RuntimeError(f"zh abstract too short: {content.abstract_zh_chars}")
+    if content.abstract_en_words < 300:
+        raise RuntimeError(f"en abstract too short: {content.abstract_en_words}")
+    if content.foreign_translation_chars < 2000:
+        raise RuntimeError(f"foreign translation too short: {content.foreign_translation_chars}")
+    chapter_text = "\n".join(content.chapters)
+    missing_chapters = [f"第{i}章" for i in range(1, 8) if f"第{i}章" not in chapter_text]
+    if missing_chapters:
+        raise RuntimeError(f"missing chapters: {missing_chapters}")
+    missing_markers = [
+        marker for marker in ["摘 要", "ABSTRACT", "参考文献", "附录一", "附录二", "附录三"]
+        if marker not in content.full_text
+    ]
+    if missing_markers:
+        raise RuntimeError(f"missing structural markers: {missing_markers}")
+
+
+def verify_headers_exact() -> None:
+    doc = Document(str(OUT))
+    headers = []
+    for section in doc.sections:
+        text = " ".join(paragraph.text.strip() for paragraph in section.header.paragraphs if paragraph.text.strip()).strip()
+        if text:
+            headers.append(text)
+    if not headers:
+        raise RuntimeError("no body headers found")
+    bad_headers = [header for header in headers if header != EXPECTED_HEADER]
+    if bad_headers:
+        raise RuntimeError(f"unexpected headers: {bad_headers}")
+    if any(("(" in header or ")" in header or "（" in header or "）" in header or "论文" in header) for header in headers):
+        raise RuntimeError(f"header still contains parentheses or thesis suffix: {headers}")
+
+
+def verify_font_contract() -> None:
+    root = Path(__file__).resolve().parent
+    src_dir = root / "src"
+    if str(src_dir) not in sys.path:
+        sys.path.insert(0, str(src_dir))
+    from thesis_format_checker.docx_inspector import inspect
+
+    docx = inspect(OUT)
+    for style_name, expected_ea, expected_latin in [
+        ("Normal", "宋体", "Times New Roman"),
+        ("Body Text", "宋体", "Times New Roman"),
+    ]:
+        style = docx.styles.get(style_name)
+        if style is None:
+            raise RuntimeError(f"missing style: {style_name}")
+        if style.east_asia and style.east_asia != expected_ea:
+            raise RuntimeError(f"{style_name} eastAsia={style.east_asia}, expected {expected_ea}")
+        if style.latin and style.latin != expected_latin:
+            raise RuntimeError(f"{style_name} latin={style.latin}, expected {expected_latin}")
+
+    bad_fonts = []
+    for item in iter_direct_run_fonts(OUT):
+        ea = item["east_asia"]
+        ascii_font = item["ascii"]
+        hansi = item["hansi"]
+        if ea and ea not in ALLOWED_EAST_ASIA_FONTS:
+            bad_fonts.append(item)
+        if ascii_font and ascii_font not in ALLOWED_LATIN_FONTS:
+            bad_fonts.append(item)
+        if hansi and hansi not in ALLOWED_LATIN_FONTS:
+            bad_fonts.append(item)
+        if len(bad_fonts) >= 5:
+            break
+    if bad_fonts:
+        raise RuntimeError(f"unexpected direct fonts: {bad_fonts}")
+
+
+def verify_forbidden_terms() -> None:
+    text = document_text(OUT)
+    hits = {term: text.count(term) for term in FORBIDDEN_TERMS if text.count(term)}
+    if hits:
+        raise RuntimeError(f"forbidden terms present: {hits}")
+
+
+def verify_image_table_count() -> None:
+    before = Document(str(SRC))
+    after = Document(str(OUT))
+    if len(after.inline_shapes) < len(before.inline_shapes):
+        raise RuntimeError(f"inline image count decreased: source={len(before.inline_shapes)} output={len(after.inline_shapes)}")
+    if len(after.tables) < len(before.tables):
+        raise RuntimeError(f"table count decreased: source={len(before.tables)} output={len(after.tables)}")
+
+
+def verify_blank_scan_contract(blank_suspects: list[dict]) -> None:
+    pages = {item.get("page") for item in blank_suspects}
+    unexpected = pages - ALLOWED_BLANK_PAGES
+    if unexpected:
+        raise RuntimeError(f"unexpected blank-scan pages: {sorted(unexpected)}")
+    if 90 in pages:
+        raise RuntimeError("reference orphan tail page returned at page 90")
+    if len(blank_suspects) > 7:
+        raise RuntimeError(f"blank suspects increased: {len(blank_suspects)}")
+
+
+def verify_visual_audit(audit: dict) -> None:
+    if audit["non_black_runs"] or audit["style_non_black"]:
+        raise RuntimeError(f"visual color audit failed: {audit}")
+
+
 def update_version_log(blank_suspects: list[dict], audit: dict) -> None:
     entry = f"""
 
@@ -436,14 +620,25 @@ def update_version_log(blank_suspects: list[dict], audit: dict) -> None:
   - 将 Hyperlink、TOC、Pandoc 代码 token 等样式表颜色统一为黑色，移除主题色残留。
   - 将正文、标题、题注、目录、页眉页脚和代码段的基础字体口径统一。
   - 在第2章小结、第4.2节、第6章小结补入短承接段，修复明显页尾留白和叙述断裂。
+  - 参考文献单独恢复为 10.5pt 紧凑排版，消除尾页只剩 3 条文献的孤页问题。
 - 颜色审计: visible_runs={audit['visible_runs']}, non_black_runs={audit['non_black_runs']}, style_non_black={audit['style_non_black']}
 """
     if VERSION_LOG.exists():
         text = VERSION_LOG.read_text(encoding="utf-8")
     else:
         text = "# 202213210刘高朋修改迭代版 版本记录\n"
-    if "## v012 - 全篇黑色字体统一版" not in text:
-        VERSION_LOG.write_text(text.rstrip() + entry + "\n", encoding="utf-8")
+    marker = "## v012 - 全篇黑色字体统一版"
+    start = text.find(marker)
+    if start == -1:
+        updated = text.rstrip() + entry + "\n"
+    else:
+        next_match = re.search(r"\n## v\d+", text[start + len(marker):])
+        if next_match:
+            end = start + len(marker) + next_match.start()
+            updated = text[:start].rstrip() + entry + text[end:]
+        else:
+            updated = text[:start].rstrip() + entry + "\n"
+    VERSION_LOG.write_text(updated, encoding="utf-8")
 
 
 def main() -> None:
@@ -457,8 +652,16 @@ def main() -> None:
     patch_xml_colors_and_styles()
     export_pdf()
     run_checker()
+    verify_delivery_contract()
+    verify_content_integrity()
+    verify_headers_exact()
+    verify_font_contract()
+    verify_forbidden_terms()
+    verify_image_table_count()
     blank_suspects = scan_pdf_blank_space()
     audit = audit_visual_format()
+    verify_blank_scan_contract(blank_suspects)
+    verify_visual_audit(audit)
     update_version_log(blank_suspects, audit)
     print(f"OUT={OUT}")
     print(f"PDF={PDF}")
