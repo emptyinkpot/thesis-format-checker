@@ -100,7 +100,10 @@ ENGINEERING_FIGURES = {
     "图3.2 系统原理图": ENGINEERING_PAPER_READY_ROOT / "figure_01_system_principle_schematic.png",
     "图3.3 STM32主控接口原理图": ENGINEERING_PAPER_READY_ROOT / "figure_02_pre_bluepill_schematic.png",
     "图3.4 PCB顶层布线检查图": ENGINEERING_PAPER_READY_ROOT / "figure_03a_pre_bluepill_top_copper_review.png",
-    "图3.5 PCB三维装配与模块位置图": ENGINEERING_PAPER_READY_ROOT / "figure_04_pre_bluepill_pcb_3d.png",
+    "图3.5 KiCad元器件连线原理图": ENGINEERING_PAPER_READY_ROOT / "figure_04_kicad_component_schematic.png",
+}
+ENGINEERING_FIGURE_SOURCE_SHA256 = {
+    "图3.5 KiCad元器件连线原理图": "576705875f1b4ba154fe631efa70e3bcd7d63bab47786d69566e8ac860537526",
 }
 
 
@@ -205,6 +208,14 @@ def prepare_engineering_figure_assets(docx_path: Path) -> dict[str, Path]:
     for index, (caption, source) in enumerate(ENGINEERING_FIGURES.items(), start=1):
         if not source.exists():
             raise RuntimeError(f"engineering source asset missing for {caption}: {source}")
+        expected_source_sha = ENGINEERING_FIGURE_SOURCE_SHA256.get(caption)
+        if expected_source_sha:
+            actual_source_sha = sha256(source.read_bytes())
+            if actual_source_sha != expected_source_sha:
+                raise RuntimeError(
+                    f"engineering source asset changed for {caption}: "
+                    f"{source}={actual_source_sha}, expected={expected_source_sha}"
+                )
         target = render_dir / f"figure_{index:02d}_{source.stem}.png"
         if source.suffix.lower() == ".svg":
             subprocess.run(

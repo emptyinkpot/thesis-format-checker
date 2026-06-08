@@ -111,7 +111,7 @@ readability:
       - "图3.2 系统原理图"
       - "图3.3 STM32主控接口原理图"
       - "图3.4 PCB顶层布线检查图"
-      - "图3.5 PCB三维装配与模块位置图"
+      - "图3.5 KiCad元器件连线原理图"
     required_term_groups:
       - name: "module-photo"
         any_of: ["左侧实物", "主要硬件模块", "实物模块"]
