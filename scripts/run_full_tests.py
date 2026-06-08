@@ -7,10 +7,11 @@ Run from anywhere:
 What it covers:
 - Python syntax/bytecode compilation
 - built-in unit contracts for rules and preset loading
-- v013 DOCX regeneration through the canonical delivery builder
-- NCWU checker pass on v013
+- v014 DOCX regeneration through the canonical delivery builder
+- NCWU checker pass on v014
+- first-page cover contract against the school literature-review template
 - color-consistency regression check against v011
-- v013 visual audit and blank-scan sanity checks
+- v014 visual audit and blank-scan sanity checks
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from zipfile import ZipFile
 from xml.etree import ElementTree as ET
 
 from docx import Document
+from docx.oxml.ns import qn
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,11 +38,14 @@ ORIGINAL = DOWNLOADS / "202213210刘高朋修改迭代版.docx"
 V011 = DOWNLOADS / "202213210刘高朋修改迭代版_v011_格式统一交付版.docx"
 V012 = DOWNLOADS / "202213210刘高朋修改迭代版_v012_全篇黑色字体统一版.docx"
 V013 = DOWNLOADS / "202213210刘高朋修改迭代版_v013_阅读节奏优化版.docx"
-V013_PDF = DOWNLOADS / "202213210刘高朋修改迭代版_v013_阅读节奏优化版.pdf"
-V013_REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v013_格式检测报告.md"
-V013_BLANK_REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v013_留白扫描.json"
+V014 = DOWNLOADS / "202213210刘高朋修改迭代版_v014_封面模板修正版.docx"
+V014_PDF = DOWNLOADS / "202213210刘高朋修改迭代版_v014_封面模板修正版.pdf"
+V014_REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v014_格式检测报告.md"
+V014_BLANK_REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v014_留白扫描.json"
 VERSION_LOG = DOWNLOADS / "202213210刘高朋修改迭代版_版本记录.md"
 EXPECTED_HEADER = "华北水利水电大学毕业设计"
+COVER_TEMPLATE = DOWNLOADS / "202213210刘高朋_文献综述_标准模板版.docx"
+COVER_TITLE = "毕业设计（论文）"
 W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
 FORBIDDEN_TERMS = [
@@ -61,8 +66,17 @@ FORBIDDEN_TERMS = [
 ]
 
 ALLOWED_BLANK_PAGES = {2, 3, 23, 52, 53, 69, 76}
-ALLOWED_EAST_ASIA_FONTS = {"宋体", "黑体", "仿宋_GB2312", "隶书", "Consolas"}
+ALLOWED_EAST_ASIA_FONTS = {"宋体", "黑体", "楷体", "仿宋_GB2312", "隶书", "Consolas"}
 ALLOWED_LATIN_FONTS = {"Times New Roman", "Consolas", "宋体"}
+
+COVER_TABLE_ROWS = [
+    ("学    院", "电子工程学院"),
+    ("专    业", "电子信息工程"),
+    ("姓    名", "刘高朋"),
+    ("学    号", "202213210"),
+    ("指导教师", "张晓华"),
+    ("完成时间", "2026年6月"),
+]
 
 
 @dataclass
@@ -111,6 +125,26 @@ def iter_direct_run_fonts(path: Path):
                 }
 
 
+def run_size_pt(run) -> float | None:
+    if run.font.size is not None:
+        return run.font.size.pt
+    rpr = run._element.find(qn("w:rPr"))
+    if rpr is None:
+        return None
+    size = rpr.find(qn("w:sz"))
+    if size is None:
+        return None
+    value = size.get(qn("w:val"))
+    return int(value) / 2 if value and value.isdigit() else None
+
+
+def first_visible_run(paragraph):
+    for run in paragraph.runs:
+        if run.text.strip():
+            return run
+    return None
+
+
 def step_compileall() -> str:
     run_command([
         sys.executable,
@@ -154,7 +188,7 @@ def step_unit_contracts() -> str:
     return "rule registry and preset contracts passed"
 
 
-def step_regenerate_v013() -> str:
+def step_regenerate_v014() -> str:
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
     if str(SRC_DIR) not in sys.path:
@@ -168,40 +202,89 @@ def step_regenerate_v013() -> str:
     except Exception:
         print(output.getvalue())
         raise
-    if not V013.exists():
-        raise RuntimeError(f"v013 DOCX missing after generation: {V013}")
-    return "generated v013 DOCX/PDF/report/blank-scan"
+    if not V014.exists():
+        raise RuntimeError(f"v014 DOCX missing after generation: {V014}")
+    return "generated v014 DOCX/PDF/report/blank-scan"
 
 
 def step_delivery_contract() -> str:
-    required = [ORIGINAL, V012, V013, V013_PDF, V013_REPORT, V013_BLANK_REPORT, VERSION_LOG]
+    required = [ORIGINAL, V013, V014, V014_PDF, V014_REPORT, V014_BLANK_REPORT, VERSION_LOG]
     missing = [str(path) for path in required if not path.exists()]
     if missing:
         raise RuntimeError(f"missing delivery artifacts: {missing}")
-    if V013.suffix.lower() != ".docx":
-        raise RuntimeError(f"final artifact is not a DOCX: {V013}")
-    if "_v013_" not in V013.name:
-        raise RuntimeError(f"final DOCX is not versioned as v013: {V013.name}")
-    if ORIGINAL.name == V013.name:
+    if V014.suffix.lower() != ".docx":
+        raise RuntimeError(f"final artifact is not a DOCX: {V014}")
+    if "_v014_" not in V014.name:
+        raise RuntimeError(f"final DOCX is not versioned as v014: {V014.name}")
+    if ORIGINAL.name == V014.name:
         raise RuntimeError("final DOCX overwrote the original filename")
 
     log_text = VERSION_LOG.read_text(encoding="utf-8")
-    if V013.name not in log_text or "v013 - 阅读节奏优化版" not in log_text:
-        raise RuntimeError("version log is missing current v013 delivery facts")
-    return "v013 DOCX/PDF/report/version-log artifacts present"
+    if V014.name not in log_text or "v014 - 封面模板修正版" not in log_text:
+        raise RuntimeError("version log is missing current v014 delivery facts")
+    return "v014 DOCX/PDF/report/version-log artifacts present"
 
 
-def step_check_v013() -> str:
+def step_cover_contract() -> str:
+    if not COVER_TEMPLATE.exists():
+        raise RuntimeError(f"cover reference template missing: {COVER_TEMPLATE}")
+    doc = Document(str(V014))
+    if len(doc.paragraphs) < 10 or not doc.tables:
+        raise RuntimeError("cover structure is missing")
+
+    school = doc.paragraphs[1]
+    title = doc.paragraphs[3]
+    topic = doc.paragraphs[4]
+    footer = doc.paragraphs[9]
+    if school.text.strip() != "华北水利水电大学":
+        raise RuntimeError(f"cover school name mismatch: {school.text!r}")
+    if title.text.strip() != COVER_TITLE:
+        raise RuntimeError(f"cover title mismatch: {title.text!r}")
+    cover_text = "\n".join(paragraph.text for paragraph in doc.paragraphs[:10])
+    if "文献综述" in cover_text or "毕 业 设 计" in cover_text:
+        raise RuntimeError(f"cover contains stale title text: {cover_text!r}")
+
+    school_run = first_visible_run(school)
+    title_run = first_visible_run(title)
+    topic_run = first_visible_run(topic)
+    footer_run = first_visible_run(footer)
+    if school_run is None or (run_size_pt(school_run) or 0) < 40 or school_run.bold is not True:
+        raise RuntimeError("cover school name is not template-scale bold type")
+    if title_run is None or (run_size_pt(title_run) or 0) < 28 or title_run.bold is not True:
+        raise RuntimeError("cover title is not template-scale bold type")
+    if topic_run is None or (run_size_pt(topic_run) or 0) < 17 or topic_run.bold is not True:
+        raise RuntimeError("cover topic line is not template-scale bold type")
+    if footer_run is None or (run_size_pt(footer_run) or 0) < 13:
+        raise RuntimeError("cover footer is not template size")
+
+    table = doc.tables[0]
+    for row_index, (label, value) in enumerate(COVER_TABLE_ROWS):
+        row = table.rows[row_index]
+        actual_label = row.cells[0].text.strip()
+        actual_value = row.cells[1].text.strip()
+        if actual_label != label or actual_value != value:
+            raise RuntimeError(f"cover table row {row_index} mismatch: {(actual_label, actual_value)}")
+        for cell in row.cells[:2]:
+            for paragraph in cell.paragraphs:
+                for run in paragraph.runs:
+                    if not run.text.strip():
+                        continue
+                    if (run_size_pt(run) or 0) < 13 or run.bold is not True:
+                        raise RuntimeError(f"cover table style mismatch at row {row_index}: {run.text!r}")
+    return "cover matches historical template contract with main-thesis title"
+
+
+def step_check_v014() -> str:
     if str(SRC_DIR) not in sys.path:
         sys.path.insert(0, str(SRC_DIR))
     from thesis_format_checker.checker import check, load_preset
 
     preset = load_preset("ncwu")
-    _docx, _content, findings = check(V013, preset)
+    _docx, _content, findings = check(V014, preset)
     if findings:
         detail = "; ".join(f"{f.rule_id}: {f.message}" for f in findings[:5])
-        raise RuntimeError(f"v013 checker findings={len(findings)} {detail}")
-    return "v013 checker findings=0"
+        raise RuntimeError(f"v014 checker findings={len(findings)} {detail}")
+    return "v014 checker findings=0"
 
 
 def step_content_integrity_contract() -> str:
@@ -210,7 +293,7 @@ def step_content_integrity_contract() -> str:
     from thesis_format_checker.checker import check, load_preset
 
     preset = load_preset("ncwu")
-    _docx, content, _findings = check(V013, preset)
+    _docx, content, _findings = check(V014, preset)
     if content.abstract_zh_chars < 500:
         raise RuntimeError(f"zh abstract too short: {content.abstract_zh_chars}")
     if content.abstract_en_words < 300:
@@ -232,7 +315,7 @@ def step_content_integrity_contract() -> str:
 
 
 def step_header_contract() -> str:
-    doc = Document(str(V013))
+    doc = Document(str(V014))
     headers = []
     for section in doc.sections:
         text = " ".join(paragraph.text.strip() for paragraph in section.header.paragraphs if paragraph.text.strip()).strip()
@@ -253,7 +336,7 @@ def step_font_contract() -> str:
         sys.path.insert(0, str(SRC_DIR))
     from thesis_format_checker.docx_inspector import inspect
 
-    docx = inspect(V013)
+    docx = inspect(V014)
     style_expectations = {
         "Normal": ("宋体", "Times New Roman"),
         "Body Text": ("宋体", "Times New Roman"),
@@ -268,7 +351,7 @@ def step_font_contract() -> str:
             raise RuntimeError(f"{style_name} latin={style.latin}, expected {expected_latin}")
 
     bad_fonts = []
-    for item in iter_direct_run_fonts(V013):
+    for item in iter_direct_run_fonts(V014):
         ea = item["east_asia"]
         ascii_font = item["ascii"]
         hansi = item["hansi"]
@@ -286,7 +369,7 @@ def step_font_contract() -> str:
 
 
 def step_forbidden_terms_contract() -> str:
-    text = document_text(V013)
+    text = document_text(V014)
     hits = {term: text.count(term) for term in FORBIDDEN_TERMS if text.count(term)}
     if hits:
         raise RuntimeError(f"forbidden terms present: {hits}")
@@ -294,12 +377,12 @@ def step_forbidden_terms_contract() -> str:
 
 
 def step_image_table_contract() -> str:
-    before = Document(str(V012))
-    after = Document(str(V013))
+    before = Document(str(V013))
+    after = Document(str(V014))
     if len(after.inline_shapes) < len(before.inline_shapes):
-        raise RuntimeError(f"inline image count decreased: v012={len(before.inline_shapes)} v013={len(after.inline_shapes)}")
+        raise RuntimeError(f"inline image count decreased: v013={len(before.inline_shapes)} v014={len(after.inline_shapes)}")
     if len(after.tables) < len(before.tables):
-        raise RuntimeError(f"table count decreased: v012={len(before.tables)} v013={len(after.tables)}")
+        raise RuntimeError(f"table count decreased: v013={len(before.tables)} v014={len(after.tables)}")
     return f"images/tables preserved: images={len(after.inline_shapes)}, tables={len(after.tables)}"
 
 
@@ -323,14 +406,14 @@ def step_visual_audit() -> str:
 
     audit = build_lgp_docx.audit_visual_format()
     if audit["non_black_runs"] or audit["style_non_black"]:
-        raise RuntimeError(f"v013 color audit failed: {audit}")
+        raise RuntimeError(f"v014 color audit failed: {audit}")
     return f"color audit passed: {audit}"
 
 
 def step_blank_scan_sanity() -> str:
-    if not V013_BLANK_REPORT.exists():
-        raise RuntimeError(f"blank scan report missing: {V013_BLANK_REPORT}")
-    suspects = json.loads(V013_BLANK_REPORT.read_text(encoding="utf-8"))
+    if not V014_BLANK_REPORT.exists():
+        raise RuntimeError(f"blank scan report missing: {V014_BLANK_REPORT}")
+    suspects = json.loads(V014_BLANK_REPORT.read_text(encoding="utf-8"))
     pages = {item.get("page") for item in suspects}
     unexpected = pages - ALLOWED_BLANK_PAGES
     if unexpected:
@@ -364,9 +447,10 @@ def main() -> int:
     steps = [
         ("compileall", step_compileall),
         ("unit-contracts", step_unit_contracts),
-        ("regenerate-v013", step_regenerate_v013),
+        ("regenerate-v014", step_regenerate_v014),
         ("delivery-contract", step_delivery_contract),
-        ("check-v013", step_check_v013),
+        ("cover-contract", step_cover_contract),
+        ("check-v014", step_check_v014),
         ("content-integrity", step_content_integrity_contract),
         ("header-contract", step_header_contract),
         ("font-contract", step_font_contract),

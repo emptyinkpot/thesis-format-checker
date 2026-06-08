@@ -1,13 +1,13 @@
-"""Generate Liu Gaopeng thesis v013 with delivery-format normalization.
+"""Generate Liu Gaopeng thesis v014 with cover-template normalization.
 
-Input is the last structurally safe delivery candidate, v012. This script keeps
+Input is the last structurally safe delivery candidate, v013. This script keeps
 the document content chain intact, then fixes visual inconsistencies that the
 school-rule checker does not fully cover:
 
+- first-page cover style copied from the school literature-review template
 - style-level colors such as Hyperlink and Pandoc token styles
 - direct run colors
 - body / heading / caption / TOC base fonts
-- several short bridge paragraphs for page rhythm and narrative continuity
 """
 
 from __future__ import annotations
@@ -31,14 +31,16 @@ from lxml import etree
 ROOT = Path(__file__).resolve().parents[1]
 DOWNLOADS = Path(r"C:/Users/ASUS-KL/Downloads")
 ORIGINAL = DOWNLOADS / "202213210刘高朋修改迭代版.docx"
-SRC = DOWNLOADS / "202213210刘高朋修改迭代版_v012_全篇黑色字体统一版.docx"
-OUT = DOWNLOADS / "202213210刘高朋修改迭代版_v013_阅读节奏优化版.docx"
+SRC = DOWNLOADS / "202213210刘高朋修改迭代版_v013_阅读节奏优化版.docx"
+OUT = DOWNLOADS / "202213210刘高朋修改迭代版_v014_封面模板修正版.docx"
 PDF = OUT.with_suffix(".pdf")
-REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v013_格式检测报告.md"
-BLANK_REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v013_留白扫描.json"
-PAGE_DIR = DOWNLOADS / "202213210刘高朋修改迭代版_v013_pdf_pages"
+REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v014_格式检测报告.md"
+BLANK_REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v014_留白扫描.json"
+PAGE_DIR = DOWNLOADS / "202213210刘高朋修改迭代版_v014_pdf_pages"
 VERSION_LOG = DOWNLOADS / "202213210刘高朋修改迭代版_版本记录.md"
 EXPECTED_HEADER = "华北水利水电大学毕业设计"
+COVER_TEMPLATE = DOWNLOADS / "202213210刘高朋_文献综述_标准模板版.docx"
+COVER_TITLE = "毕业设计（论文）"
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 NS = {"w": W_NS}
@@ -61,8 +63,17 @@ FORBIDDEN_TERMS = [
 ]
 
 ALLOWED_BLANK_PAGES = {2, 3, 23, 52, 53, 69, 76}
-ALLOWED_EAST_ASIA_FONTS = {"宋体", "黑体", "仿宋_GB2312", "隶书", "Consolas"}
+ALLOWED_EAST_ASIA_FONTS = {"宋体", "黑体", "楷体", "仿宋_GB2312", "隶书", "Consolas"}
 ALLOWED_LATIN_FONTS = {"Times New Roman", "Consolas", "宋体"}
+
+COVER_TABLE_ROWS = [
+    ("学    院", "电子工程学院"),
+    ("专    业", "电子信息工程"),
+    ("姓    名", "刘高朋"),
+    ("学    号", "202213210"),
+    ("指导教师", "张晓华"),
+    ("完成时间", "2026年6月"),
+]
 
 
 BRIDGE_PARAGRAPHS = {
@@ -257,6 +268,69 @@ def insert_bridge_paragraphs(doc: Document) -> None:
             raise RuntimeError(f"找不到插入锚点: {anchor}")
 
 
+def replace_paragraph_text(paragraph, text: str):
+    for run in list(paragraph.runs):
+        paragraph._element.remove(run._element)
+    return paragraph.add_run(text)
+
+
+def set_cover_paragraph(paragraph, text: str, alignment, east_asia: str, latin: str, size_pt: float, bold: bool | None) -> None:
+    run = replace_paragraph_text(paragraph, text)
+    paragraph.alignment = alignment
+    set_run_visual(run, east_asia, latin, size_pt, bold)
+
+
+def restore_cover_template_style(doc: Document) -> None:
+    """Restore the first-page cover contract from the school template.
+
+    The body normalizer intentionally touches all visible text, so the cover is
+    repaired afterwards as a separate front-matter layer. The reference is the
+    literature-review cover template; only the middle title changes to the
+    main-thesis title.
+    """
+    if not COVER_TEMPLATE.exists():
+        raise FileNotFoundError(COVER_TEMPLATE)
+    if len(doc.paragraphs) < 10 or not doc.tables:
+        raise RuntimeError("document does not have the expected cover structure")
+
+    set_cover_paragraph(doc.paragraphs[0], "存档编号                 ", WD_ALIGN_PARAGRAPH.RIGHT, "宋体", "Times New Roman", 12, True)
+    set_cover_paragraph(doc.paragraphs[1], "华北水利水电大学", WD_ALIGN_PARAGRAPH.CENTER, "隶书", "Times New Roman", 42, True)
+    set_cover_paragraph(
+        doc.paragraphs[2],
+        "North China University of Water Resources and Electric Power",
+        WD_ALIGN_PARAGRAPH.CENTER,
+        "宋体",
+        "Times New Roman",
+        12,
+        None,
+    )
+    set_cover_paragraph(doc.paragraphs[3], COVER_TITLE, WD_ALIGN_PARAGRAPH.CENTER, "楷体", "Times New Roman", 30, True)
+    set_cover_paragraph(
+        doc.paragraphs[4],
+        "题目    基于嵌入式的二氧化碳监测与预警器设计",
+        None,
+        "宋体",
+        "Times New Roman",
+        18,
+        True,
+    )
+    set_cover_paragraph(doc.paragraphs[9], "教务处制", WD_ALIGN_PARAGRAPH.CENTER, "宋体", "Times New Roman", 14, None)
+
+    table = doc.tables[0]
+    if len(table.rows) < len(COVER_TABLE_ROWS):
+        raise RuntimeError("cover table is missing expected rows")
+    for row_index, (label, value) in enumerate(COVER_TABLE_ROWS):
+        row = table.rows[row_index]
+        row.cells[0].text = label
+        row.cells[1].text = value
+        for cell_index, cell in enumerate(row.cells[:2]):
+            for paragraph in cell.paragraphs:
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT if cell_index == 0 else WD_ALIGN_PARAGRAPH.CENTER
+                for run in paragraph.runs:
+                    if run.text:
+                        set_run_visual(run, "宋体", "Times New Roman", 14, True)
+
+
 def normalize_docx_with_python_docx() -> None:
     shutil.copy2(SRC, OUT)
     doc = Document(str(OUT))
@@ -303,6 +377,7 @@ def normalize_docx_with_python_docx() -> None:
                         if run.text:
                             set_run_visual(run, east_asia, latin, size_pt, bold)
 
+    restore_cover_template_style(doc)
     doc.save(str(OUT))
 
 
@@ -493,10 +568,71 @@ def verify_delivery_contract() -> None:
     missing = [str(path) for path in required if not path.exists()]
     if missing:
         raise RuntimeError(f"missing delivery artifacts: {missing}")
-    if OUT.suffix.lower() != ".docx" or "_v013_" not in OUT.name:
+    if OUT.suffix.lower() != ".docx" or "_v014_" not in OUT.name:
         raise RuntimeError(f"final output is not the expected versioned DOCX: {OUT}")
     if ORIGINAL.name == OUT.name:
         raise RuntimeError("final output overwrote the original filename")
+
+
+def run_size_pt(run) -> float | None:
+    if run.font.size is not None:
+        return run.font.size.pt
+    rpr = run._element.find(qn("w:rPr"))
+    if rpr is None:
+        return None
+    size = rpr.find(qn("w:sz"))
+    if size is None:
+        return None
+    value = size.get(qn("w:val"))
+    return int(value) / 2 if value and value.isdigit() else None
+
+
+def first_visible_run(paragraph):
+    for run in paragraph.runs:
+        if run.text.strip():
+            return run
+    return None
+
+
+def verify_cover_contract() -> None:
+    doc = Document(str(OUT))
+    if len(doc.paragraphs) < 10 or not doc.tables:
+        raise RuntimeError("cover structure is missing")
+
+    school_run = first_visible_run(doc.paragraphs[1])
+    title_run = first_visible_run(doc.paragraphs[3])
+    topic_run = first_visible_run(doc.paragraphs[4])
+    footer_run = first_visible_run(doc.paragraphs[9])
+    if doc.paragraphs[1].text.strip() != "华北水利水电大学":
+        raise RuntimeError(f"cover school name mismatch: {doc.paragraphs[1].text!r}")
+    if doc.paragraphs[3].text.strip() != COVER_TITLE:
+        raise RuntimeError(f"cover title mismatch: {doc.paragraphs[3].text!r}")
+    cover_text = "\n".join(p.text for p in doc.paragraphs[:10])
+    if "文献综述" in cover_text or "毕 业 设 计" in cover_text:
+        raise RuntimeError(f"cover contains stale title text: {cover_text!r}")
+    if school_run is None or (run_size_pt(school_run) or 0) < 40 or school_run.bold is not True:
+        raise RuntimeError("cover school name is not restored to template-scale bold type")
+    if title_run is None or (run_size_pt(title_run) or 0) < 28 or title_run.bold is not True:
+        raise RuntimeError("cover title is not restored to template-scale bold type")
+    if topic_run is None or (run_size_pt(topic_run) or 0) < 17 or topic_run.bold is not True:
+        raise RuntimeError("cover topic line is not restored to template-scale bold type")
+    if footer_run is None or (run_size_pt(footer_run) or 0) < 13:
+        raise RuntimeError("cover footer is not restored to template size")
+
+    table = doc.tables[0]
+    for row_index, (label, value) in enumerate(COVER_TABLE_ROWS):
+        row = table.rows[row_index]
+        actual_label = row.cells[0].text.strip()
+        actual_value = row.cells[1].text.strip()
+        if actual_label != label or actual_value != value:
+            raise RuntimeError(f"cover table row {row_index} mismatch: {(actual_label, actual_value)}")
+        for cell in row.cells[:2]:
+            for paragraph in cell.paragraphs:
+                for run in paragraph.runs:
+                    if not run.text.strip():
+                        continue
+                    if (run_size_pt(run) or 0) < 13 or run.bold is not True:
+                        raise RuntimeError(f"cover table style mismatch at row {row_index}: {run.text!r}")
 
 
 def verify_content_integrity() -> None:
@@ -619,24 +755,25 @@ def verify_visual_audit(audit: dict) -> None:
 def update_version_log(blank_suspects: list[dict], audit: dict) -> None:
     entry = f"""
 
-## v013 - 阅读节奏优化版
+## v014 - 封面模板修正版
 
 - 文件: `{OUT}`
 - PDF: `{PDF}`
 - 检测报告: `{REPORT}`
 - 留白扫描: `{BLANK_REPORT}`，可疑页 {len(blank_suspects)} 页
 - 处理内容:
-  - 基于 v012 继续迭代，不覆盖原始文件和上一版交付件。
-  - 补充移动端截图后的解释段，使图 5.7 至图 5.14 与设备上传字段、服务端接口和页面展示形成更清楚的对应关系。
-  - 在第 6 章精度测试处补充定位说明，避免测试结论被误读为计量级检测。
-  - 保持页眉、字体、颜色、图片、表格和参考文献紧凑排版规则。
+  - 基于 v013 继续迭代，不覆盖原始文件和上一版交付件。
+  - 恢复封面首页为学校文献综述模板的版式尺度。
+  - 封面主标题固定为“毕业设计（论文）”，不保留“文献综述”，也不退回“毕 业 设 计”。
+  - 将封面作为独立 front-matter 契约处理，避免被正文 12pt 全篇统一逻辑覆盖。
+  - 保持 v013 的阅读节奏补充段、页眉、字体、颜色、图片、表格和参考文献紧凑排版规则。
 - 颜色审计: visible_runs={audit['visible_runs']}, non_black_runs={audit['non_black_runs']}, style_non_black={audit['style_non_black']}
 """
     if VERSION_LOG.exists():
         text = VERSION_LOG.read_text(encoding="utf-8")
     else:
         text = "# 202213210刘高朋修改迭代版 版本记录\n"
-    marker = "## v013 - 阅读节奏优化版"
+    marker = "## v014 - 封面模板修正版"
     start = text.find(marker)
     if start == -1:
         updated = text.rstrip() + entry + "\n"
@@ -663,6 +800,7 @@ def main() -> None:
     run_checker()
     verify_content_integrity()
     verify_headers_exact()
+    verify_cover_contract()
     verify_font_contract()
     verify_forbidden_terms()
     verify_image_table_count()
