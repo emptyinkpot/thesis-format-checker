@@ -2,7 +2,7 @@
 
 Run from anywhere:
 
-    python E:/My Project/thesis-format-checker/run_full_tests.py
+    python E:/My Project/thesis-format-checker/scripts/run_full_tests.py
 
 What it covers:
 - Python syntax/bytecode compilation
@@ -29,7 +29,7 @@ from xml.etree import ElementTree as ET
 from docx import Document
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = ROOT / "src"
 DOWNLOADS = Path(r"C:/Users/ASUS-KL/Downloads")
 ORIGINAL = DOWNLOADS / "202213210刘高朋修改迭代版.docx"
@@ -117,7 +117,7 @@ def step_compileall() -> str:
         "compileall",
         str(ROOT / "src" / "thesis_format_checker"),
         str(ROOT / "format_lgp_v012.py"),
-        str(ROOT / "run_full_tests.py"),
+        str(ROOT / "scripts" / "run_full_tests.py"),
     ])
     return "compileall passed"
 
