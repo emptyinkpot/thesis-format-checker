@@ -1,13 +1,13 @@
-"""Generate Liu Gaopeng thesis v012 with visual-format normalization.
+"""Generate Liu Gaopeng thesis v013 with delivery-format normalization.
 
-Input is the last structurally safe delivery candidate, v011. This script keeps
+Input is the last structurally safe delivery candidate, v012. This script keeps
 the document content chain intact, then fixes visual inconsistencies that the
 school-rule checker does not fully cover:
 
 - style-level colors such as Hyperlink and Pandoc token styles
 - direct run colors
 - body / heading / caption / TOC base fonts
-- several short bridge paragraphs for obvious page-rhythm gaps
+- several short bridge paragraphs for page rhythm and narrative continuity
 """
 
 from __future__ import annotations
@@ -28,14 +28,15 @@ from docx.shared import Pt, RGBColor
 from lxml import etree
 
 
+ROOT = Path(__file__).resolve().parents[1]
 DOWNLOADS = Path(r"C:/Users/ASUS-KL/Downloads")
 ORIGINAL = DOWNLOADS / "202213210刘高朋修改迭代版.docx"
-SRC = DOWNLOADS / "202213210刘高朋修改迭代版_v011_格式统一交付版.docx"
-OUT = DOWNLOADS / "202213210刘高朋修改迭代版_v012_全篇黑色字体统一版.docx"
+SRC = DOWNLOADS / "202213210刘高朋修改迭代版_v012_全篇黑色字体统一版.docx"
+OUT = DOWNLOADS / "202213210刘高朋修改迭代版_v013_阅读节奏优化版.docx"
 PDF = OUT.with_suffix(".pdf")
-REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v012_格式检测报告.md"
-BLANK_REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v012_留白扫描.json"
-PAGE_DIR = DOWNLOADS / "202213210刘高朋修改迭代版_v012_pdf_pages"
+REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v013_格式检测报告.md"
+BLANK_REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v013_留白扫描.json"
+PAGE_DIR = DOWNLOADS / "202213210刘高朋修改迭代版_v013_pdf_pages"
 VERSION_LOG = DOWNLOADS / "202213210刘高朋修改迭代版_版本记录.md"
 EXPECTED_HEADER = "华北水利水电大学毕业设计"
 
@@ -74,6 +75,12 @@ BRIDGE_PARAGRAPHS = {
     ],
     "从论文结构看，第6章的测试内容与前文设计内容逐项对应": [
         "因此，第6章的意义不只是列出测试结果，而是用测试记录把前文的设计链路重新闭合。采集、报警、显示、上传和移动端查看分别对应不同测试项目，任何一项异常都能追溯到具体硬件接口或程序模块，这也为后续优化提供了明确入口。"
+    ],
+    "图5.12 手机端维护管理页面截图": [
+        "从图5.7至图5.12可以看出，移动端页面并非单独展示界面效果，而是围绕实时值、历史趋势、设备状态和维护入口组织。登录页解决访问入口，首页承担快速判断，数据分析页用于追踪变化，设备、场景和维护页面则为后续管理留下扩展位置。这样处理后，截图与前文的服务端接口和设备上传字段能够对应起来。"
+    ],
+    "由表6.4可知，样机读数与参考仪器变化趋势一致": [
+        "该结果说明，样机在毕业设计阶段更适合用于趋势监测和阈值提示，而不是作为计量级检测仪器。后续若要用于长期部署，还需要结合标准气体或校准设备进行周期校准，并在不同温湿度条件下重新记录误差范围。"
     ],
 }
 
@@ -486,15 +493,16 @@ def verify_delivery_contract() -> None:
     missing = [str(path) for path in required if not path.exists()]
     if missing:
         raise RuntimeError(f"missing delivery artifacts: {missing}")
-    if OUT.suffix.lower() != ".docx" or "_v012_" not in OUT.name:
+    if OUT.suffix.lower() != ".docx" or "_v013_" not in OUT.name:
         raise RuntimeError(f"final output is not the expected versioned DOCX: {OUT}")
     if ORIGINAL.name == OUT.name:
         raise RuntimeError("final output overwrote the original filename")
 
 
 def verify_content_integrity() -> None:
-    root = Path(__file__).resolve().parent
-    src_dir = root / "src"
+    src_dir = ROOT / "src"
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
     if str(src_dir) not in sys.path:
         sys.path.insert(0, str(src_dir))
     from thesis_format_checker.checker import check, load_preset
@@ -539,8 +547,9 @@ def verify_headers_exact() -> None:
 
 
 def verify_font_contract() -> None:
-    root = Path(__file__).resolve().parent
-    src_dir = root / "src"
+    src_dir = ROOT / "src"
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
     if str(src_dir) not in sys.path:
         sys.path.insert(0, str(src_dir))
     from thesis_format_checker.docx_inspector import inspect
@@ -610,24 +619,24 @@ def verify_visual_audit(audit: dict) -> None:
 def update_version_log(blank_suspects: list[dict], audit: dict) -> None:
     entry = f"""
 
-## v012 - 全篇黑色字体统一版
+## v013 - 阅读节奏优化版
 
 - 文件: `{OUT}`
 - PDF: `{PDF}`
 - 检测报告: `{REPORT}`
 - 留白扫描: `{BLANK_REPORT}`，可疑页 {len(blank_suspects)} 页
 - 处理内容:
-  - 将 Hyperlink、TOC、Pandoc 代码 token 等样式表颜色统一为黑色，移除主题色残留。
-  - 将正文、标题、题注、目录、页眉页脚和代码段的基础字体口径统一。
-  - 在第2章小结、第4.2节、第6章小结补入短承接段，修复明显页尾留白和叙述断裂。
-  - 参考文献单独恢复为 10.5pt 紧凑排版，消除尾页只剩 3 条文献的孤页问题。
+  - 基于 v012 继续迭代，不覆盖原始文件和上一版交付件。
+  - 补充移动端截图后的解释段，使图 5.7 至图 5.14 与设备上传字段、服务端接口和页面展示形成更清楚的对应关系。
+  - 在第 6 章精度测试处补充定位说明，避免测试结论被误读为计量级检测。
+  - 保持页眉、字体、颜色、图片、表格和参考文献紧凑排版规则。
 - 颜色审计: visible_runs={audit['visible_runs']}, non_black_runs={audit['non_black_runs']}, style_non_black={audit['style_non_black']}
 """
     if VERSION_LOG.exists():
         text = VERSION_LOG.read_text(encoding="utf-8")
     else:
         text = "# 202213210刘高朋修改迭代版 版本记录\n"
-    marker = "## v012 - 全篇黑色字体统一版"
+    marker = "## v013 - 阅读节奏优化版"
     start = text.find(marker)
     if start == -1:
         updated = text.rstrip() + entry + "\n"
@@ -652,7 +661,6 @@ def main() -> None:
     patch_xml_colors_and_styles()
     export_pdf()
     run_checker()
-    verify_delivery_contract()
     verify_content_integrity()
     verify_headers_exact()
     verify_font_contract()
@@ -660,6 +668,7 @@ def main() -> None:
     verify_image_table_count()
     blank_suspects = scan_pdf_blank_space()
     audit = audit_visual_format()
+    verify_delivery_contract()
     verify_blank_scan_contract(blank_suspects)
     verify_visual_audit(audit)
     update_version_log(blank_suspects, audit)

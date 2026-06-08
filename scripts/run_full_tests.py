@@ -7,10 +7,10 @@ Run from anywhere:
 What it covers:
 - Python syntax/bytecode compilation
 - built-in unit contracts for rules and preset loading
-- v012 DOCX regeneration through the canonical formatter
-- NCWU checker pass on v012
+- v013 DOCX regeneration through the canonical delivery builder
+- NCWU checker pass on v013
 - color-consistency regression check against v011
-- v012 visual audit and blank-scan sanity checks
+- v013 visual audit and blank-scan sanity checks
 """
 
 from __future__ import annotations
@@ -35,9 +35,10 @@ DOWNLOADS = Path(r"C:/Users/ASUS-KL/Downloads")
 ORIGINAL = DOWNLOADS / "202213210刘高朋修改迭代版.docx"
 V011 = DOWNLOADS / "202213210刘高朋修改迭代版_v011_格式统一交付版.docx"
 V012 = DOWNLOADS / "202213210刘高朋修改迭代版_v012_全篇黑色字体统一版.docx"
-V012_PDF = DOWNLOADS / "202213210刘高朋修改迭代版_v012_全篇黑色字体统一版.pdf"
-V012_REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v012_格式检测报告.md"
-V012_BLANK_REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v012_留白扫描.json"
+V013 = DOWNLOADS / "202213210刘高朋修改迭代版_v013_阅读节奏优化版.docx"
+V013_PDF = DOWNLOADS / "202213210刘高朋修改迭代版_v013_阅读节奏优化版.pdf"
+V013_REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v013_格式检测报告.md"
+V013_BLANK_REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v013_留白扫描.json"
 VERSION_LOG = DOWNLOADS / "202213210刘高朋修改迭代版_版本记录.md"
 EXPECTED_HEADER = "华北水利水电大学毕业设计"
 W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
@@ -116,7 +117,7 @@ def step_compileall() -> str:
         "-m",
         "compileall",
         str(ROOT / "src" / "thesis_format_checker"),
-        str(ROOT / "format_lgp_v012.py"),
+        str(ROOT / "delivery" / "build_lgp_docx.py"),
         str(ROOT / "scripts" / "run_full_tests.py"),
     ])
     return "compileall passed"
@@ -153,54 +154,54 @@ def step_unit_contracts() -> str:
     return "rule registry and preset contracts passed"
 
 
-def step_regenerate_v012() -> str:
+def step_regenerate_v013() -> str:
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
     if str(SRC_DIR) not in sys.path:
         sys.path.insert(0, str(SRC_DIR))
-    import format_lgp_v012
+    from delivery import build_lgp_docx
 
     output = io.StringIO()
     try:
         with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
-            format_lgp_v012.main()
+            build_lgp_docx.main()
     except Exception:
         print(output.getvalue())
         raise
-    if not V012.exists():
-        raise RuntimeError(f"v012 DOCX missing after generation: {V012}")
-    return "generated v012 DOCX/PDF/report/blank-scan"
+    if not V013.exists():
+        raise RuntimeError(f"v013 DOCX missing after generation: {V013}")
+    return "generated v013 DOCX/PDF/report/blank-scan"
 
 
 def step_delivery_contract() -> str:
-    required = [ORIGINAL, V011, V012, V012_PDF, V012_REPORT, V012_BLANK_REPORT, VERSION_LOG]
+    required = [ORIGINAL, V012, V013, V013_PDF, V013_REPORT, V013_BLANK_REPORT, VERSION_LOG]
     missing = [str(path) for path in required if not path.exists()]
     if missing:
         raise RuntimeError(f"missing delivery artifacts: {missing}")
-    if V012.suffix.lower() != ".docx":
-        raise RuntimeError(f"final artifact is not a DOCX: {V012}")
-    if "_v012_" not in V012.name:
-        raise RuntimeError(f"final DOCX is not versioned as v012: {V012.name}")
-    if ORIGINAL.name == V012.name:
+    if V013.suffix.lower() != ".docx":
+        raise RuntimeError(f"final artifact is not a DOCX: {V013}")
+    if "_v013_" not in V013.name:
+        raise RuntimeError(f"final DOCX is not versioned as v013: {V013.name}")
+    if ORIGINAL.name == V013.name:
         raise RuntimeError("final DOCX overwrote the original filename")
 
     log_text = VERSION_LOG.read_text(encoding="utf-8")
-    if V012.name not in log_text or "可疑页 7 页" not in log_text:
-        raise RuntimeError("version log is missing current v012 delivery facts")
-    return "v012 DOCX/PDF/report/version-log artifacts present"
+    if V013.name not in log_text or "v013 - 阅读节奏优化版" not in log_text:
+        raise RuntimeError("version log is missing current v013 delivery facts")
+    return "v013 DOCX/PDF/report/version-log artifacts present"
 
 
-def step_check_v012() -> str:
+def step_check_v013() -> str:
     if str(SRC_DIR) not in sys.path:
         sys.path.insert(0, str(SRC_DIR))
     from thesis_format_checker.checker import check, load_preset
 
     preset = load_preset("ncwu")
-    _docx, _content, findings = check(V012, preset)
+    _docx, _content, findings = check(V013, preset)
     if findings:
         detail = "; ".join(f"{f.rule_id}: {f.message}" for f in findings[:5])
-        raise RuntimeError(f"v012 checker findings={len(findings)} {detail}")
-    return "v012 checker findings=0"
+        raise RuntimeError(f"v013 checker findings={len(findings)} {detail}")
+    return "v013 checker findings=0"
 
 
 def step_content_integrity_contract() -> str:
@@ -209,7 +210,7 @@ def step_content_integrity_contract() -> str:
     from thesis_format_checker.checker import check, load_preset
 
     preset = load_preset("ncwu")
-    _docx, content, _findings = check(V012, preset)
+    _docx, content, _findings = check(V013, preset)
     if content.abstract_zh_chars < 500:
         raise RuntimeError(f"zh abstract too short: {content.abstract_zh_chars}")
     if content.abstract_en_words < 300:
@@ -231,7 +232,7 @@ def step_content_integrity_contract() -> str:
 
 
 def step_header_contract() -> str:
-    doc = Document(str(V012))
+    doc = Document(str(V013))
     headers = []
     for section in doc.sections:
         text = " ".join(paragraph.text.strip() for paragraph in section.header.paragraphs if paragraph.text.strip()).strip()
@@ -252,7 +253,7 @@ def step_font_contract() -> str:
         sys.path.insert(0, str(SRC_DIR))
     from thesis_format_checker.docx_inspector import inspect
 
-    docx = inspect(V012)
+    docx = inspect(V013)
     style_expectations = {
         "Normal": ("宋体", "Times New Roman"),
         "Body Text": ("宋体", "Times New Roman"),
@@ -267,7 +268,7 @@ def step_font_contract() -> str:
             raise RuntimeError(f"{style_name} latin={style.latin}, expected {expected_latin}")
 
     bad_fonts = []
-    for item in iter_direct_run_fonts(V012):
+    for item in iter_direct_run_fonts(V013):
         ea = item["east_asia"]
         ascii_font = item["ascii"]
         hansi = item["hansi"]
@@ -285,7 +286,7 @@ def step_font_contract() -> str:
 
 
 def step_forbidden_terms_contract() -> str:
-    text = document_text(V012)
+    text = document_text(V013)
     hits = {term: text.count(term) for term in FORBIDDEN_TERMS if text.count(term)}
     if hits:
         raise RuntimeError(f"forbidden terms present: {hits}")
@@ -293,12 +294,12 @@ def step_forbidden_terms_contract() -> str:
 
 
 def step_image_table_contract() -> str:
-    before = Document(str(V011))
-    after = Document(str(V012))
+    before = Document(str(V012))
+    after = Document(str(V013))
     if len(after.inline_shapes) < len(before.inline_shapes):
-        raise RuntimeError(f"inline image count decreased: v011={len(before.inline_shapes)} v012={len(after.inline_shapes)}")
+        raise RuntimeError(f"inline image count decreased: v012={len(before.inline_shapes)} v013={len(after.inline_shapes)}")
     if len(after.tables) < len(before.tables):
-        raise RuntimeError(f"table count decreased: v011={len(before.tables)} v012={len(after.tables)}")
+        raise RuntimeError(f"table count decreased: v012={len(before.tables)} v013={len(after.tables)}")
     return f"images/tables preserved: images={len(after.inline_shapes)}, tables={len(after.tables)}"
 
 
@@ -318,18 +319,18 @@ def step_regression_v011_color_rule() -> str:
 def step_visual_audit() -> str:
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
-    import format_lgp_v012
+    from delivery import build_lgp_docx
 
-    audit = format_lgp_v012.audit_visual_format()
+    audit = build_lgp_docx.audit_visual_format()
     if audit["non_black_runs"] or audit["style_non_black"]:
-        raise RuntimeError(f"v012 color audit failed: {audit}")
+        raise RuntimeError(f"v013 color audit failed: {audit}")
     return f"color audit passed: {audit}"
 
 
 def step_blank_scan_sanity() -> str:
-    if not V012_BLANK_REPORT.exists():
-        raise RuntimeError(f"blank scan report missing: {V012_BLANK_REPORT}")
-    suspects = json.loads(V012_BLANK_REPORT.read_text(encoding="utf-8"))
+    if not V013_BLANK_REPORT.exists():
+        raise RuntimeError(f"blank scan report missing: {V013_BLANK_REPORT}")
+    suspects = json.loads(V013_BLANK_REPORT.read_text(encoding="utf-8"))
     pages = {item.get("page") for item in suspects}
     unexpected = pages - ALLOWED_BLANK_PAGES
     if unexpected:
@@ -363,9 +364,9 @@ def main() -> int:
     steps = [
         ("compileall", step_compileall),
         ("unit-contracts", step_unit_contracts),
-        ("regenerate-v012", step_regenerate_v012),
+        ("regenerate-v013", step_regenerate_v013),
         ("delivery-contract", step_delivery_contract),
-        ("check-v012", step_check_v012),
+        ("check-v013", step_check_v013),
         ("content-integrity", step_content_integrity_contract),
         ("header-contract", step_header_contract),
         ("font-contract", step_font_contract),
