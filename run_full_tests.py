@@ -6,7 +6,7 @@ Run from anywhere:
 
 What it covers:
 - Python syntax/bytecode compilation
-- pytest unit tests when pytest is installed
+- built-in unit contracts for rules and preset loading
 - v012 DOCX regeneration through the canonical formatter
 - NCWU checker pass on v012
 - color-consistency regression check against v011
@@ -15,7 +15,6 @@ What it covers:
 
 from __future__ import annotations
 
-import importlib.util
 import contextlib
 import io
 import json
@@ -61,11 +60,35 @@ def step_compileall() -> str:
     return "compileall passed"
 
 
-def step_pytest() -> str:
-    if importlib.util.find_spec("pytest") is None:
-        raise SkipStep("pytest is not installed")
-    run_command([sys.executable, "-m", "pytest"], cwd=ROOT)
-    return "pytest passed"
+def step_unit_contracts() -> str:
+    if str(SRC_DIR) not in sys.path:
+        sys.path.insert(0, str(SRC_DIR))
+    from thesis_format_checker.rules import RULES
+    from thesis_format_checker.checker import load_preset
+
+    expected_rules = {
+        "page-margins", "header-text-match", "header-on-all-sections",
+        "body-font-size", "body-east-asia-font", "text-color-consistency",
+        "body-line-spacing", "heading1-style", "heading2-style",
+        "heading3-style", "heading-style-applied", "chapter-page-break",
+        "abstract-zh-length", "abstract-en-length", "foreign-translation-length",
+        "toc-present", "cover-fields",
+    }
+    missing = expected_rules - set(RULES.keys())
+    if missing:
+        raise RuntimeError(f"missing rule registrations: {sorted(missing)}")
+
+    preset = load_preset("ncwu")
+    if preset["preset_id"] != "ncwu":
+        raise RuntimeError(f"unexpected preset_id: {preset['preset_id']}")
+    if preset["page"]["margin_cm"]["left"] != 3.0:
+        raise RuntimeError("unexpected left margin in preset")
+    if preset["styles"]["body"]["size_pt"] != 12:
+        raise RuntimeError("unexpected body font size in preset")
+    if preset["content"]["abstract_zh"]["min_chars"] != 500:
+        raise RuntimeError("unexpected zh abstract threshold in preset")
+
+    return "rule registry and preset contracts passed"
 
 
 def step_regenerate_v012() -> str:
@@ -160,7 +183,7 @@ def main() -> int:
 
     steps = [
         ("compileall", step_compileall),
-        ("pytest", step_pytest),
+        ("unit-contracts", step_unit_contracts),
         ("regenerate-v012", step_regenerate_v012),
         ("check-v012", step_check_v012),
         ("regression-v011-color-rule", step_regression_v011_color_rule),
