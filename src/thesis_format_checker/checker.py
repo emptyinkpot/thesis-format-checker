@@ -9,13 +9,13 @@ import yaml
 
 from .docx_inspector import inspect as docx_inspect, InspectResult
 from .content_inspector import inspect as content_inspect, ContentResult
-from .rules import evaluate_all, Finding
+from .standard.rules import evaluate_all, Finding
 
-PRESETS_DIR = Path(__file__).resolve().parent.parent.parent / "presets"
+STANDARD_DIR = Path(__file__).resolve().parent / "standard"
 
 
 def load_preset(name_or_path: str | None = None) -> dict[str, Any]:
-    """Load a preset by name (looks in presets/) or by file path."""
+    """Load a standard preset by name or explicit YAML path."""
     if name_or_path is None:
         name_or_path = "ncwu"
 
@@ -24,7 +24,7 @@ def load_preset(name_or_path: str | None = None) -> dict[str, Any]:
         with open(path, encoding="utf-8") as f:
             return yaml.safe_load(f)
 
-    preset_file = PRESETS_DIR / f"{name_or_path}.yaml"
+    preset_file = STANDARD_DIR / f"{name_or_path}.yaml"
     if preset_file.exists():
         with open(preset_file, encoding="utf-8") as f:
             return yaml.safe_load(f)

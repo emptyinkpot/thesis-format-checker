@@ -41,4 +41,4 @@ Issues = "https://github.com/emptyinkpot/thesis-format-checker/issues"
 packages = ["src/thesis_format_checker"]
 
 [tool.hatch.build]
-include = ["src/thesis_format_checker/**/*.py", "presets/*.yaml"]
+include = ["src/thesis_format_checker/**/*.py", "src/thesis_format_checker/standard/*.yaml"]

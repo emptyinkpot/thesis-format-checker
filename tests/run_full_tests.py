@@ -81,6 +81,7 @@ COVER_TABLE_ROWS = [
     ("指导教师", "张晓华"),
     ("完成时间", "2026年6月"),
 ]
+BODY_MUTATION_ANCHOR = "本章回答本设计为什么需要开展"
 
 
 @dataclass
@@ -220,6 +221,50 @@ def append_docx_paragraph(document_xml: bytes, text: str) -> tuple[bytes, bool]:
     return xml_bytes(root), True
 
 
+def make_xml_paragraph(text: str) -> ET.Element:
+    paragraph = ET.Element(f"{W_NS}p")
+    run = ET.SubElement(paragraph, f"{W_NS}r")
+    text_node = ET.SubElement(run, f"{W_NS}t")
+    text_node.text = text
+    return paragraph
+
+
+def paragraph_xml_text(paragraph: ET.Element) -> str:
+    return "".join(node.text or "" for node in paragraph.findall(f".//{W_NS}t")).strip()
+
+
+def insert_after_paragraph_prefix(document_xml: bytes, prefix: str, texts: list[str]) -> tuple[bytes, bool]:
+    root = ET.fromstring(document_xml)
+    body = root.find(f"{W_NS}body")
+    if body is None:
+        return document_xml, False
+    children = list(body)
+    for index, child in enumerate(children):
+        if child.tag != f"{W_NS}p":
+            continue
+        if paragraph_xml_text(child).startswith(prefix):
+            for offset, text in enumerate(texts, start=1):
+                body.insert(index + offset, make_xml_paragraph(text))
+            return xml_bytes(root), True
+    return document_xml, False
+
+
+def insert_before_paragraph_prefix(document_xml: bytes, prefix: str, texts: list[str]) -> tuple[bytes, bool]:
+    root = ET.fromstring(document_xml)
+    body = root.find(f"{W_NS}body")
+    if body is None:
+        return document_xml, False
+    children = list(body)
+    for index, child in enumerate(children):
+        if child.tag != f"{W_NS}p":
+            continue
+        if paragraph_xml_text(child).startswith(prefix):
+            for offset, text in enumerate(texts):
+                body.insert(index + offset, make_xml_paragraph(text))
+            return xml_bytes(root), True
+    return document_xml, False
+
+
 def remove_header_borders(name: str, data: bytes) -> tuple[bytes, bool]:
     if not name.startswith("word/header") or not name.endswith(".xml"):
         return data, False
@@ -311,6 +356,65 @@ def add_isolated_table_caption(name: str, data: bytes) -> tuple[bytes, bool]:
     return append_docx_paragraph(data, "表 9.99 错误表题")
 
 
+def add_overlong_body_paragraph(name: str, data: bytes) -> tuple[bytes, bool]:
+    if name != "word/document.xml":
+        return data, False
+    text = (
+        "这一段用于验证正文阅读节奏规则。"
+        "如果论文正文把多个设计依据、接口关系、程序流程、调试现象和测试结论全部塞进同一段，读者会很难快速判断这一段到底在讲哪一个层次。"
+        "规范要求正文段落应保持适度长度，超过阈值时应拆成若干逻辑段，并让每一段分别承担背景、实现、验证或结论中的一个功能。"
+        "这里故意写成很长的一段，确保检测器能够在真实DOCX中识别段落过密的问题，而不是只在人工构造的字符串上通过测试。"
+        "该回归用例同时避免误伤英文摘要和参考文献等特殊区域，只要求正文主体章节保持稳定的讲述节奏。"
+        "如果后续修改把这条规则绕开，测试应当立即失败，因为论文迭代的目标不是把材料继续堆长，而是把设计依据、实现过程和验证结论分成清楚可读的段落。"
+        "同时，这段文字必须被插入到正文第1章之后，而不是目录、摘要或封面区域，否则规则按正文范围过滤时就不会触发。"
+        "这能证明测试入口确实理解论文结构，而不是只靠随意拼接XML制造表面通过的检查。"
+    )
+    return insert_after_paragraph_prefix(data, BODY_MUTATION_ANCHOR, [text])
+
+
+def add_unexplained_figure_caption(name: str, data: bytes) -> tuple[bytes, bool]:
+    if name != "word/document.xml":
+        return data, False
+    return insert_after_paragraph_prefix(data, BODY_MUTATION_ANCHOR, ["图9.91 缺少前后说明的测试图"])
+
+
+def add_figure_caption_without_followup(name: str, data: bytes) -> tuple[bytes, bool]:
+    if name != "word/document.xml":
+        return data, False
+    return insert_before_paragraph_prefix(data, "致 谢", ["图9.92 缺少后续说明的测试图"])
+
+
+def add_unbalanced_figure_group(name: str, data: bytes) -> tuple[bytes, bool]:
+    if name != "word/document.xml":
+        return data, False
+    captions = [
+        "图9.91 连续截图一",
+        "图9.92 连续截图二",
+        "图9.93 连续截图三",
+        "图9.94 连续截图四",
+    ]
+    return insert_after_paragraph_prefix(data, BODY_MUTATION_ANCHOR, captions)
+
+
+def remove_module_visual_lead_text(name: str, data: bytes) -> tuple[bytes, bool]:
+    if name != "word/document.xml":
+        return data, False
+    root = ET.fromstring(data)
+    changed = False
+    for text_node in root.findall(f".//{W_NS}t"):
+        text = text_node.text or ""
+        patched = (
+            text
+            .replace("左侧实物", "左侧模块")
+            .replace("右侧说明", "右侧文字")
+            .replace("源码", "文件")
+        )
+        if patched != text:
+            text_node.text = patched
+            changed = True
+    return (xml_bytes(root), True) if changed else (data, False)
+
+
 def remove_table_cant_split(name: str, data: bytes) -> tuple[bytes, bool]:
     if name != "word/document.xml":
         return data, False
@@ -360,7 +464,7 @@ def step_compileall() -> str:
 def step_unit_contracts() -> str:
     if str(SRC_DIR) not in sys.path:
         sys.path.insert(0, str(SRC_DIR))
-    from thesis_format_checker.rules import RULES
+    from thesis_format_checker.standard.rules import RULES
     from thesis_format_checker.checker import load_preset
 
     preset = load_preset("ncwu")
@@ -381,6 +485,24 @@ def step_unit_contracts() -> str:
         raise RuntimeError("unexpected body font size in preset")
     if preset["content"]["abstract_zh"]["min_chars"] != 500:
         raise RuntimeError("unexpected zh abstract threshold in preset")
+    expected_standard_rules = {
+        "readability-paragraph-length",
+        "figure-lead-text",
+        "figure-followup-text",
+        "figure-text-balance",
+        "module-visual-block",
+    }
+    missing_standard_rules = expected_standard_rules - enabled_preset_rules
+    if missing_standard_rules:
+        raise RuntimeError(f"readability/visual rules not enabled in preset: {sorted(missing_standard_rules)}")
+    readability = preset.get("readability", {})
+    if readability.get("max_body_paragraph_chars") != 360:
+        raise RuntimeError("unexpected body paragraph rhythm threshold")
+    module_block = readability.get("module_block", {})
+    if not module_block.get("enabled"):
+        raise RuntimeError("module visual block rule is not enabled")
+    if "图3.1 主要硬件模块实物图" not in module_block.get("target_captions", []):
+        raise RuntimeError("module visual block target caption is missing")
 
     return f"rule registry and preset contracts passed: enabled_rules={len(enabled_preset_rules)}"
 
@@ -403,6 +525,11 @@ def step_rule_regression_contracts() -> str:
         ("body-first-line-indent", remove_first_line_indent),
         ("cover-no-page-number", add_cover_footer_page_number),
         ("figure-caption-position", add_isolated_figure_caption),
+        ("readability-paragraph-length", add_overlong_body_paragraph),
+        ("figure-lead-text", add_unexplained_figure_caption),
+        ("figure-followup-text", add_figure_caption_without_followup),
+        ("figure-text-balance", add_unbalanced_figure_group),
+        ("module-visual-block", remove_module_visual_lead_text),
         ("table-caption-position", add_isolated_table_caption),
         ("table-no-page-break", remove_table_cant_split),
     ]

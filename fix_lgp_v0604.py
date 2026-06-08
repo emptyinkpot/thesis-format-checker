@@ -1163,7 +1163,7 @@ def export_pdf() -> None:
 def verify_with_checker() -> None:
     from thesis_format_checker.checker import check, load_preset
 
-    preset = load_preset("presets/ncwu.yaml")
+    preset = load_preset("ncwu")
     _docx, content, findings = check(str(OUT), preset)
     print(f"checker findings: {len(findings)}")
     for finding in findings:

@@ -14,7 +14,7 @@ from docx.enum.text import WD_LINE_SPACING
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
 
-from .rules import Finding
+from .standard.rules import Finding
 
 
 CHAPTER_TEXT_RE = re.compile(r"^第\d+章\s+\S+")

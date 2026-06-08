@@ -8,7 +8,7 @@ flowchart TB
     subgraph INPUT["① 输入层 · 待校验 DOCX + 规则 preset"]
         direction TB
         DOCX["thesis.docx<br/>(任意 Word 论文文件)"]
-        PRESET["preset YAML<br/>presets/ncwu.yaml (内置)<br/>或 --rules custom.yaml"]
+        PRESET["standard YAML<br/>src/thesis_format_checker/standard/ncwu.yaml (内置)<br/>或 --rules custom.yaml"]
         CLI["thesis-check check thesis.docx<br/>--preset / --rules / --json / --md / --fix"]
         DOCX --> CLI
         PRESET --> CLI
@@ -31,8 +31,8 @@ flowchart TB
     %% ===================== ③ 规则评估层 =====================
     subgraph RULES["③ 规则评估层 · @rule 装饰器注册"]
         direction TB
-        REG["RULES dict<br/>(rules.py 顶部)"]
-        FNS["check_page_margins<br/>check_body_font_size<br/>check_heading_style_applied<br/>check_abstract_zh_length<br/>check_foreign_translation_length<br/>check_cover_fields ...等 16 条"]
+        REG["RULES dict<br/>(standard/rules.py 顶部)"]
+        FNS["check_page_margins<br/>check_body_font_size<br/>check_heading_style_applied<br/>check_abstract_zh_length<br/>check_figure_lead_text<br/>check_module_visual_block ..."]
         EVAL["evaluate_all<br/>每条规则: severity/enabled 由 preset 覆盖"]
         FINDS["Finding 列表<br/>{rule_id, severity, message, expected, actual, location, fixable}"]
         REG --> FNS

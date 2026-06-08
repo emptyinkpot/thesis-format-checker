@@ -22,7 +22,12 @@ python "E:\My Project\thesis-format-checker\delivery\run_delivery.py"
 python "E:\My Project\thesis-format-checker\tests\run_full_tests.py"
 ```
 
-`delivery/run_delivery.py` 是业务 main；`tests/run_full_tests.py` 是测试 main。`src/`、`presets/` 是内部实现或规则数据，不作为日常启动入口。
+`delivery/run_delivery.py` 是业务 main；`tests/run_full_tests.py` 是测试 main。`src/` 是内部实现，不作为日常启动入口。
+
+标准真源统一在 `src/thesis_format_checker/standard/`：
+
+- `ncwu.yaml`：华北水利水电大学格式、阅读节奏和视觉块规则配置
+- `rules.py`：可执行规则注册与检测逻辑
 
 ## 底层检测 CLI
 
@@ -77,10 +82,15 @@ thesis-check list-rules --preset ncwu
 | foreign-translation-length | 外文译文字数 | - |
 | toc-present | 目录存在 | - |
 | cover-fields | 封面字段完整 | - |
+| readability-paragraph-length | 正文段落阅读节奏 | - |
+| figure-lead-text | 图前引导说明 | - |
+| figure-followup-text | 图后解释说明 | - |
+| figure-text-balance | 连续图片与文字比例 | - |
+| module-visual-block | 模块图实物/说明/接口/源码/测试链路 | - |
 
 ## 自定义规则
 
-参考 `presets/ncwu.yaml` 和 `examples/custom-school.yaml` 编写你自己学校的规则集。
+参考 `src/thesis_format_checker/standard/ncwu.yaml` 和 `examples/custom-school.yaml` 编写你自己学校的规则集。
 
 ## License
 

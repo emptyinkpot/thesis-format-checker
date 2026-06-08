@@ -7,7 +7,7 @@ Each rule is a function decorated with @rule() that takes
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable
 
 
@@ -717,6 +717,293 @@ def check_toc_dotline(docx, content, preset) -> list[Finding]:
 
 FIGURE_CAPTION_RE_RULE = re.compile(r"^图\s*(\d+)[\.\-](\d+)\s+")
 TABLE_CAPTION_RE_RULE = re.compile(r"^表\s*(\d+)[\.\-](\d+)\s+")
+
+
+def _compact_text(text: str) -> str:
+    return re.sub(r"\s+", "", text or "")
+
+
+def _figure_caption_ref(text: str) -> tuple[str, int, int] | None:
+    match = FIGURE_CAPTION_RE_RULE.match((text or "").strip())
+    if not match:
+        return None
+    chapter = int(match.group(1))
+    number = int(match.group(2))
+    return f"图{chapter}.{number}", chapter, number
+
+
+def _is_heading_paragraph(paragraph) -> bool:
+    text = paragraph.text.strip()
+    return (
+        paragraph.style_name in {"Heading 1", "Heading 2", "Heading 3"}
+        or bool(CHAPTER_TEXT_RE.match(text))
+        or bool(SECTION_TEXT_RE.match(text))
+        or bool(SUBSECTION_TEXT_RE.match(text))
+    )
+
+
+def _is_body_scope_marker(text: str) -> str | None:
+    stripped = text.strip()
+    if CHAPTER_TEXT_RE.match(stripped):
+        return "body-start"
+    if re.match(r"^(参考文献|附录|致\s*谢|致谢)$", stripped):
+        return "body-end"
+    return None
+
+
+def _body_scope_paragraphs(docx) -> list:
+    """Return paragraphs that belong to thesis body chapters."""
+    out = []
+    in_body = False
+    for paragraph in docx.paragraphs:
+        marker = _is_body_scope_marker(paragraph.text)
+        if marker == "body-start":
+            in_body = True
+        elif marker == "body-end" and in_body:
+            break
+        if in_body:
+            out.append(paragraph)
+    return out
+
+
+def _is_plain_body_paragraph(paragraph, *, min_chars: int = 1) -> bool:
+    text = paragraph.text.strip()
+    if len(text) < min_chars:
+        return False
+    if paragraph.has_drawing or _is_heading_paragraph(paragraph):
+        return False
+    if _standard_figure_caption(text) or _standard_table_caption(text):
+        return False
+    if re.match(r"^\[\d+\]", text):
+        return False
+    if paragraph.style_name in {"Code", "Source Code", "HTML Code", "Listing"}:
+        return False
+    return True
+
+
+def _text_references_figure(text: str, chapter: int, number: int) -> bool:
+    compact = _compact_text(text)
+    exact = f"图{chapter}.{number}"
+    if exact in compact:
+        return True
+    range_re = re.compile(rf"图{chapter}\.(\d+)(?:至|到|—|-|~)图?{chapter}\.(\d+)")
+    for match in range_re.finditer(compact):
+        start = int(match.group(1))
+        end = int(match.group(2))
+        if start <= number <= end:
+            return True
+    return False
+
+
+def _has_figure_lead_text(docx, caption, lookback: int) -> bool:
+    ref = _figure_caption_ref(caption.text)
+    if ref is None:
+        return False
+    _label, chapter, number = ref
+    start = max(0, caption.index - lookback)
+    for paragraph in reversed(docx.paragraphs[start:caption.index]):
+        text = paragraph.text.strip()
+        if not text or paragraph.has_drawing:
+            continue
+        if _standard_figure_caption(text) or _standard_table_caption(text) or _is_heading_paragraph(paragraph):
+            continue
+        if _text_references_figure(text, chapter, number):
+            return True
+        compact = _compact_text(text)
+        if "图" in compact and any(term in compact for term in ("所示", "如下", "展示", "说明", "方式", "见")):
+            return True
+    return False
+
+
+def _has_figure_followup_text(docx, caption, lookahead: int, min_chars: int) -> bool:
+    end = min(len(docx.paragraphs), caption.index + lookahead + 1)
+    for paragraph in docx.paragraphs[caption.index + 1:end]:
+        if _is_body_scope_marker(paragraph.text) == "body-end":
+            break
+        if not _is_plain_body_paragraph(paragraph, min_chars=min_chars):
+            continue
+        return True
+    return False
+
+
+def _caption_run_has_group_explanation(run: list, after_paragraphs: list) -> bool:
+    if not run:
+        return True
+    first = _figure_caption_ref(run[0].text)
+    last = _figure_caption_ref(run[-1].text)
+    if first is None or last is None:
+        return False
+    _first_label, first_chapter, first_number = first
+    _last_label, last_chapter, last_number = last
+    if first_chapter != last_chapter:
+        return False
+    nearby = "\n".join(p.text for p in after_paragraphs[:4] if _is_plain_body_paragraph(p, min_chars=20))
+    if not nearby:
+        return False
+    return (
+        _text_references_figure(nearby, first_chapter, first_number)
+        and _text_references_figure(nearby, last_chapter, last_number)
+    )
+
+
+@rule("readability-paragraph-length", default_severity="warning")
+def check_readability_paragraph_length(docx, content, preset) -> list[Finding]:
+    """正文段落不应过长，避免一大块文字压住阅读节奏。"""
+    cfg = preset.get("readability", {})
+    max_chars = int(cfg.get("max_body_paragraph_chars", 360) or 0)
+    if max_chars <= 0:
+        return []
+
+    findings = []
+    for paragraph in _body_scope_paragraphs(docx):
+        if not _is_plain_body_paragraph(paragraph, min_chars=max_chars + 1):
+            continue
+        findings.append(Finding(
+            rule_id="readability-paragraph-length",
+            message=f"正文段落 {paragraph.index} 长度为 {len(paragraph.text.strip())} 字符，阅读节奏过密",
+            expected=f"≤{max_chars} 字符",
+            actual=len(paragraph.text.strip()),
+            location=f"Paragraph {paragraph.index}",
+            fixable=False,
+        ))
+    return findings
+
+
+@rule("figure-lead-text", default_severity="warning")
+def check_figure_lead_text(docx, content, preset) -> list[Finding]:
+    """图前应有引导文字，先告诉读者为什么看这张图。"""
+    cfg = preset.get("readability", {})
+    if not cfg.get("require_figure_lead_text", True):
+        return []
+    lookback = int(cfg.get("figure_lead_lookback_paragraphs", 8) or 8)
+    findings = []
+    for paragraph in _body_scope_paragraphs(docx):
+        text = paragraph.text.strip()
+        if not _standard_figure_caption(text):
+            continue
+        if _has_figure_lead_text(docx, paragraph, lookback):
+            continue
+        findings.append(Finding(
+            rule_id="figure-lead-text",
+            message=f"图题 {text[:30]!r} 前缺少引导说明，图片不应直接砸进正文",
+            expected=f"前 {lookback} 段内有图号或图组说明",
+            actual="未找到",
+            location=f"Paragraph {paragraph.index}",
+            fixable=False,
+        ))
+    return findings
+
+
+@rule("figure-followup-text", default_severity="warning")
+def check_figure_followup_text(docx, content, preset) -> list[Finding]:
+    """图后应有解释段，说明图里信息如何支撑正文。"""
+    cfg = preset.get("readability", {})
+    min_chars = int(cfg.get("min_figure_followup_chars", 40) or 40)
+    lookahead = int(cfg.get("figure_followup_lookahead_paragraphs", 8) or 8)
+    findings = []
+    for paragraph in _body_scope_paragraphs(docx):
+        text = paragraph.text.strip()
+        if not _standard_figure_caption(text):
+            continue
+        if _has_figure_followup_text(docx, paragraph, lookahead, min_chars):
+            continue
+        findings.append(Finding(
+            rule_id="figure-followup-text",
+            message=f"图题 {text[:30]!r} 后缺少解释段，题注后不能只有截图堆叠",
+            expected=f"后 {lookahead} 段内有不少于 {min_chars} 字的说明",
+            actual="未找到",
+            location=f"Paragraph {paragraph.index}",
+            fixable=False,
+        ))
+    return findings
+
+
+@rule("figure-text-balance", default_severity="warning")
+def check_figure_text_balance(docx, content, preset) -> list[Finding]:
+    """连续图片数量应受控；截图组必须有总括解释。"""
+    cfg = preset.get("readability", {})
+    max_run = int(cfg.get("max_consecutive_figures_without_text", 3) or 0)
+    if max_run <= 0:
+        return []
+
+    body_paragraphs = _body_scope_paragraphs(docx)
+    findings = []
+    run: list = []
+
+    def close_run(after_index: int) -> None:
+        nonlocal run
+        if len(run) > max_run:
+            after = [p for p in body_paragraphs if p.index >= after_index][:10]
+            if not _caption_run_has_group_explanation(run, after):
+                findings.append(Finding(
+                    rule_id="figure-text-balance",
+                    message=f"连续出现 {len(run)} 个图题但缺少图组解释，图片与正文比例失衡",
+                    expected=f"≤{max_run} 个连续图题，或后文用图号范围总括说明",
+                    actual=[p.text.strip() for p in run],
+                    location=f"Paragraph {run[0].index}",
+                    fixable=False,
+                ))
+        run = []
+
+    for paragraph in body_paragraphs:
+        text = paragraph.text.strip()
+        if _standard_figure_caption(text):
+            run.append(paragraph)
+            continue
+        if not text or paragraph.has_drawing or _is_heading_paragraph(paragraph):
+            continue
+        close_run(paragraph.index)
+    if run:
+        close_run(run[-1].index)
+    return findings
+
+
+@rule("module-visual-block", default_severity="warning")
+def check_module_visual_block(docx, content, preset) -> list[Finding]:
+    """关键模块图应形成“实物/说明或原理图/分段解释”的可读视觉块。"""
+    cfg = preset.get("readability", {}).get("module_block", {})
+    if not cfg.get("enabled", False):
+        return []
+    targets = cfg.get("target_captions", [])
+    lead_terms = cfg.get("required_lead_terms", [])
+    chain_terms = cfg.get("required_chain_terms", [])
+    findings = []
+
+    for target in targets:
+        caption = next(
+            (
+                p for p in docx.paragraphs
+                if _compact_text(target) in _compact_text(p.text)
+            ),
+            None,
+        )
+        if caption is None:
+            findings.append(Finding(
+                rule_id="module-visual-block",
+                message=f"未找到目标模块图题 {target!r}",
+                expected=target,
+                actual="missing",
+                location="正文",
+                fixable=False,
+            ))
+            continue
+
+        before = docx.paragraphs[max(0, caption.index - 8):caption.index]
+        nearby = docx.paragraphs[max(0, caption.index - 8):min(len(docx.paragraphs), caption.index + 14)]
+        before_text = _compact_text("\n".join(p.text for p in before))
+        nearby_text = _compact_text("\n".join(p.text for p in nearby))
+        missing_lead = [term for term in lead_terms if _compact_text(term) not in before_text]
+        missing_chain = [term for term in chain_terms if _compact_text(term) not in nearby_text]
+        if missing_lead or missing_chain:
+            findings.append(Finding(
+                rule_id="module-visual-block",
+                message=f"{target} 附近缺少模块视觉块说明：前导缺 {missing_lead}，链路缺 {missing_chain}",
+                expected={"lead_terms": lead_terms, "chain_terms": chain_terms},
+                actual={"missing_lead": missing_lead, "missing_chain": missing_chain},
+                location=f"Paragraph {caption.index}",
+                fixable=False,
+            ))
+    return findings
 
 
 @rule("figure-caption-position", default_severity="warning")

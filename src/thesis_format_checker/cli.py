@@ -80,7 +80,7 @@ def check_command(ctx, docx_path, preset, rules, output_json, md_path, fix_path)
 @click.option("--preset", "-p", default=None, help="Preset name or path")
 def list_rules(preset):
     """List all available rules and their status."""
-    from .rules import RULES, _get_rule_config
+    from .standard.rules import RULES, _get_rule_config
 
     try:
         preset_data = load_preset(preset)

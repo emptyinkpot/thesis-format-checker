@@ -89,6 +89,20 @@ structure:
   max_consecutive_empty: 3
   max_code_block_lines: 30
 
+readability:
+  max_body_paragraph_chars: 360
+  require_figure_lead_text: true
+  figure_lead_lookback_paragraphs: 12
+  figure_followup_lookahead_paragraphs: 8
+  min_figure_followup_chars: 40
+  max_consecutive_figures_without_text: 3
+  module_block:
+    enabled: true
+    required_lead_terms: ["左侧实物", "右侧说明"]
+    required_chain_terms: ["实物", "接口", "源码", "测试"]
+    target_captions:
+      - "图3.1 主要硬件模块实物图"
+
 # 规则开关：可单独 enable/disable + 调严重度
 # severity: error | warning | info
 rules:
@@ -183,6 +197,21 @@ rules:
     severity: warning
     enabled: true
   - id: figure-caption-position
+    severity: warning
+    enabled: true
+  - id: figure-lead-text
+    severity: warning
+    enabled: true
+  - id: figure-followup-text
+    severity: warning
+    enabled: true
+  - id: figure-text-balance
+    severity: warning
+    enabled: true
+  - id: readability-paragraph-length
+    severity: warning
+    enabled: true
+  - id: module-visual-block
     severity: warning
     enabled: true
   - id: table-caption-position
