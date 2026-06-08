@@ -27,7 +27,7 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Pt, RGBColor
+from docx.shared import Inches, Pt, RGBColor
 from lxml import etree
 
 
@@ -73,12 +73,108 @@ ENGINEERING_PAPER_READY_ROOT = Path(
     r"E:/My Project/毕业设计论文/论文/我的论文/给老师_工程资料包_2026-05-26/06_论文插图与截图/07_paper_ready"
 )
 ENGINEERING_RENDER_DIR = DOWNLOADS / f"{DOCX_STEM}_v{OUT_VERSION:03d}_engineering_assets"
-ENGINEERING_MIN_IMAGE_HEIGHT_EMU = 3_000_000
+ENGINEERING_MIN_IMAGE_HEIGHT_EMU = 1_800_000
+KICAD_FULL_SCHEMATIC_SOURCE = ENGINEERING_PAPER_READY_ROOT / "figure_04_kicad_component_schematic.png"
+KICAD_LOCAL_FIGURES = [
+    (
+        "图3.5（a） 电源输入与3.3V稳压局部截图",
+        ENGINEERING_PAPER_READY_ROOT / "figure_04a_kicad_power_regulator_crop.png",
+        5.1,
+    ),
+    (
+        "图3.5（b） I2C传感器与OLED接口局部截图",
+        ENGINEERING_PAPER_READY_ROOT / "figure_04c_kicad_i2c_sensor_display_crop.png",
+        5.2,
+    ),
+    (
+        "图3.5（c） STM32主控最小系统局部截图",
+        ENGINEERING_PAPER_READY_ROOT / "figure_04b_kicad_mcu_minimum_crop.png",
+        3.2,
+    ),
+    (
+        "图3.5（d） ESP8266无线通信接口局部截图",
+        ENGINEERING_PAPER_READY_ROOT / "figure_04d_kicad_esp8266_crop.png",
+        4.6,
+    ),
+    (
+        "图3.5（e） LED与蜂鸣器报警输出局部截图",
+        ENGINEERING_PAPER_READY_ROOT / "figure_04e_kicad_alarm_output_crop.png",
+        4.4,
+    ),
+    (
+        "图3.5（f） 调试、复位、时钟与ADC局部截图",
+        ENGINEERING_PAPER_READY_ROOT / "figure_04f_kicad_debug_reset_clock_adc_crop.png",
+        5.5,
+    ),
+]
+KICAD_LOCAL_FIGURE_BY_CAPTION = {
+    caption: (source, width) for caption, source, width in KICAD_LOCAL_FIGURES
+}
+KICAD_STALE_CAPTIONS = {
+    "图3.5 供电稳压与调试检查路径图",
+    "图3.5 PCB三维装配与模块位置图",
+    "图3.5 PCB连线与元件布局图",
+    "图3.5 KiCad元器件连线原理图",
+    "图3.5 KiCad局部电路截图组",
+    *(caption for caption, _source, _width in KICAD_LOCAL_FIGURES),
+}
+KICAD_LOCAL_FIGURE_INSERTIONS = [
+    (
+        "电源系统调试阶段常见问题包括OLED刷新正常但传感器读数波动",
+        [
+            (
+                "图3.5（a） 电源输入与3.3V稳压局部截图",
+                "图3.5（a）把5V输入、AMS1117-3.3稳压器和10μF/100nF去耦电容放在同一局部中，便于说明3.3V电源怎样先稳定再分配给主控、传感器、显示屏和无线通信模块。",
+            ),
+        ],
+    ),
+    (
+        "供电设计采用5 V输入并经3.3 V稳压后提供给STM32、SCD41、OLED和ESP8266等模块",
+        [
+            (
+                "图3.5（b） I2C传感器与OLED接口局部截图",
+                "图3.5（b）对应SCD41与OLED的I2C接口分组，图中上拉电阻、SCD41四针接口和SSD1306 OLED接口共同说明采集总线与显示总线的硬件边界。",
+            ),
+        ],
+    ),
+    (
+        "本设计以调试稳定和接口清晰为首要目标进行资源分配",
+        [
+            (
+                "图3.5（c） STM32主控最小系统局部截图",
+                "图3.5（c）集中展示STM32F103C8T6主控引脚，能够直接对应PB10/PB11采集、PB6/PB7显示、PA9/PA10通信以及PA1/PB4报警输出等资源分配。",
+            ),
+            (
+                "图3.5（d） ESP8266无线通信接口局部截图",
+                "图3.5（d）单独裁出ESP8266-01S接口，重点显示TXD、RXD、RST、CH_PD/EN和3.3V供电端，便于说明无线模块与STM32串口及复位控制的连接关系。",
+            ),
+            (
+                "图3.5（e） LED与蜂鸣器报警输出局部截图",
+                "图3.5（e）对应声光报警输出，LED限流电阻、报警LED、有源蜂鸣器和三极管驱动关系能够说明PA1/PB4输出不是简单并联负载，而是分级提示链路的一部分。",
+            ),
+            (
+                "图3.5（f） 调试、复位、时钟与ADC局部截图",
+                "图3.5（f）补充SWD下载接口、复位按键、8MHz晶振和预留ADC调试端，说明硬件调试入口与主控稳定运行条件如何一起支撑后续固件烧录和联调。",
+            ),
+        ],
+    ),
+]
+KICAD_LOCAL_EXPLANATIONS = {
+    explanation
+    for _anchor, items in KICAD_LOCAL_FIGURE_INSERTIONS
+    for _caption, explanation in items
+}
+REPLACE_EXISTING_ENGINEERING_FIGURES = {
+    caption: source
+    for caption, source in {
+        "图3.2 系统原理图": ENGINEERING_PAPER_READY_ROOT / "figure_01_system_principle_schematic.png",
+        "图3.3 STM32主控接口原理图": ENGINEERING_PAPER_READY_ROOT / "figure_02_pre_bluepill_schematic.png",
+        "图3.4 PCB顶层布线检查图": ENGINEERING_PAPER_READY_ROOT / "figure_03a_pre_bluepill_top_copper_review.png",
+    }.items()
+}
 ENGINEERING_FIGURES = {
-    "图3.2 系统原理图": ENGINEERING_PAPER_READY_ROOT / "figure_01_system_principle_schematic.png",
-    "图3.3 STM32主控接口原理图": ENGINEERING_PAPER_READY_ROOT / "figure_02_pre_bluepill_schematic.png",
-    "图3.4 PCB顶层布线检查图": ENGINEERING_PAPER_READY_ROOT / "figure_03a_pre_bluepill_top_copper_review.png",
-    "图3.5 KiCad元器件连线原理图": ENGINEERING_PAPER_READY_ROOT / "figure_04_kicad_component_schematic.png",
+    **REPLACE_EXISTING_ENGINEERING_FIGURES,
+    **{caption: source for caption, source, _width in KICAD_LOCAL_FIGURES},
 }
 ENGINEERING_CAPTION_RENAMES = {
     "图3.2 系统硬件连接与接口关系图": "图3.2 系统原理图",
@@ -86,24 +182,35 @@ ENGINEERING_CAPTION_RENAMES = {
     "图3.3 传感、显示与通信接口分配图": "图3.3 STM32主控接口原理图",
     "图3.3 STM32主控接口分配图": "图3.3 STM32主控接口原理图",
     "图3.4 STM32主控引脚分配图": "图3.4 PCB顶层布线检查图",
-    "图3.5 供电稳压与调试检查路径图": "图3.5 KiCad元器件连线原理图",
-    "图3.5 PCB三维装配与模块位置图": "图3.5 KiCad元器件连线原理图",
-    "图3.5 PCB连线与元件布局图": "图3.5 KiCad元器件连线原理图",
+    "图3.5 供电稳压与调试检查路径图": "图3.5（a） 电源输入与3.3V稳压局部截图",
+    "图3.5 PCB三维装配与模块位置图": "图3.5（a） 电源输入与3.3V稳压局部截图",
+    "图3.5 PCB连线与元件布局图": "图3.5（a） 电源输入与3.3V稳压局部截图",
+    "图3.5 KiCad元器件连线原理图": "图3.5（a） 电源输入与3.3V稳压局部截图",
+    "图3.5 KiCad局部电路截图组": "图3.5（a） 电源输入与3.3V稳压局部截图",
 }
 TEXT_REPLACEMENTS = {
-    "主控侧资源分配见图3.4和表3.1。": "主控侧资源分配见表3.1，PCB布线检查见图3.4，KiCad元器件连线原理图见图3.5。",
+    "主控侧资源分配见图3.4和表3.1。": "主控侧资源分配见表3.1，PCB布线检查见图3.4，KiCad局部电路截图见图3.5（a）至图3.5（f）。",
     "无线通信接口关系已经在图3.2和图3.3中体现，软件上传流程见图4.3。": (
-        "无线通信接口关系已经在图3.2和图3.3中体现，PCB走线、KiCad元器件连线和软件上传流程分别见图3.4、图3.5和图4.3。"
+        "无线通信接口关系已经在图3.2和图3.3中体现，PCB走线、KiCad局部电路截图和软件上传流程分别见图3.4、图3.5（a）至图3.5（f）和图4.3。"
     ),
-    "PCB布线与装配关系见图3.4、图3.5。": "PCB布线检查见图3.4，KiCad元器件连线原理图见图3.5。",
+    "PCB布线与装配关系见图3.4、图3.5。": "PCB布线检查见图3.4，KiCad局部电路截图见图3.5（a）至图3.5（f）。",
     "PCB布线与模块装配见图3.4、图3.5": (
-        "PCB走线见图3.4，KiCad元器件连线见图3.5"
+        "PCB走线见图3.4，KiCad局部电路截图见图3.5（a）至图3.5（f）"
     ),
     "PCB布线与元件布局关系见图3.4、图3.5。": (
-        "PCB布线检查见图3.4，KiCad元器件连线原理图见图3.5。"
+        "PCB布线检查见图3.4，KiCad局部电路截图见图3.5（a）至图3.5（f）。"
     ),
     "PCB走线、元件布局见图3.4、图3.5": (
-        "PCB走线见图3.4，KiCad元器件连线见图3.5"
+        "PCB走线见图3.4，KiCad局部电路截图见图3.5（a）至图3.5（f）"
+    ),
+    "KiCad元器件连线原理图见图3.5": (
+        "KiCad局部电路截图见图3.5（a）至图3.5（f）"
+    ),
+    "PCB走线、KiCad元器件连线和软件上传流程分别见图3.4、图3.5和图4.3。": (
+        "PCB走线、KiCad局部电路截图和软件上传流程分别见图3.4、图3.5（a）至图3.5（f）和图4.3。"
+    ),
+    "PCB走线、KiCad局部电路截图和软件上传流程分别见图3.4、图3.5和图4.3。": (
+        "PCB走线、KiCad局部电路截图和软件上传流程分别见图3.4、图3.5（a）至图3.5（f）和图4.3。"
     ),
 }
 
@@ -131,7 +238,7 @@ FORBIDDEN_TERMS = [
     "本文按照",
 ]
 
-ALLOWED_BLANK_PAGES = {2, 3, 23, 53, 54, 70, 77}
+ALLOWED_BLANK_PAGES = {2, 3, 23, 37, 56, 57, 73, 80}
 ALLOWED_EAST_ASIA_FONTS = {"宋体", "黑体", "楷体", "仿宋_GB2312", "隶书", "Consolas"}
 ALLOWED_LATIN_FONTS = {"Times New Roman", "Consolas", "宋体"}
 
@@ -151,7 +258,7 @@ BRIDGE_PARAGRAPHS = {
     ],
     "图3.1按“左侧实物、右侧说明”的方式介绍主要硬件模块": [
         "这张图不是单独展示器件外观，而是作为第3章的模块索引：左侧实物帮助读者先识别SCD41、STM32、OLED、ESP8266和报警器件，右侧说明再对应到接口连接、原理图、PCB、固件源码和后续测试项目。这样处理后，实物、原理图、接口、PCB、源码和测试能够落在同一条说明链路上。",
-        "图3.2至图3.5继续把该索引落到工程图纸上。图3.2和图3.3采用已经整理好的系统连线图和主控接口分配截图，分别说明系统供电、传感、显示、通信、报警、调试接口以及STM32主控引脚分配；图3.4采用PCB走线检查截图说明顶层布线、焊盘和排针位置，图3.5采用KiCad黑底元器件连线原理图说明元器件符号、网络连接和接口分组。ERC/DRC检查记录、固件文件main.c、scd41.c、bsp_pins.h以及第6章测试验证一起构成后续说明依据。"
+        "图3.2至图3.5继续把该索引落到工程图纸上。图3.2和图3.3采用已经整理好的系统连线图和主控接口分配截图，分别说明系统供电、传感、显示、通信、报警、调试接口以及STM32主控引脚分配；图3.4采用PCB走线检查截图说明顶层布线、焊盘和排针位置，图3.5（a）至图3.5（f）不再缩放整张KiCad原理图，而是分别裁出电源稳压、I2C传感与显示、STM32主控、ESP8266无线通信、报警输出以及调试复位时钟ADC六个局部板块，逐块说明元器件符号、网络连接和接口分组。ERC/DRC检查记录、固件文件main.c、scd41.c、bsp_pins.h以及第6章测试验证一起构成后续说明依据。"
     ],
     "传感器采集功能对应硬件SCD41和软件scd41.c": [
         "图5.2用于说明采集代码和显示刷新之间的衔接关系。读图时应先看SCD41读取结果怎样进入主程序状态，再看OLED刷新和报警判断怎样使用同一组有效采样值。"
@@ -184,6 +291,9 @@ SUPERSEDED_PARAGRAPH_PREFIXES = [
     "这张图不是单独展示器件外观，而是作为第3章的模块索引：左侧实物帮助读者先识别",
     "图3.2和图3.3继续把该索引落到工程图纸上。",
     "图3.2至图3.5继续把该索引落到工程图纸上。",
+    "图3.5采用局部截图方式展示KiCad原理图中各功能板块。",
+    "图3.5（a）至图3.5（f）分别对应电源、I2C接口、主控、无线通信、报警输出和调试接口。",
+    "从图3.5（a）至图3.5（f）可以看出",
 ]
 
 
@@ -436,6 +546,95 @@ def normalize_caption_style(doc: Document) -> None:
         remove_xml_italic(rpr)
 
 
+def _paragraph_has_drawing(paragraph) -> bool:
+    return bool(paragraph._element.xpath(".//w:drawing"))
+
+
+def _remove_paragraph(paragraph) -> None:
+    parent = paragraph._element.getparent()
+    if parent is not None:
+        parent.remove(paragraph._element)
+
+
+def remove_stale_kicad_figure_blocks(doc: Document) -> None:
+    """Remove old whole-schematic 图3.5 blocks before inserting local crops."""
+    paragraphs = list(doc.paragraphs)
+    for index, paragraph in enumerate(paragraphs):
+        text = paragraph.text.strip()
+        if text in KICAD_LOCAL_EXPLANATIONS:
+            _remove_paragraph(paragraph)
+            continue
+        if text not in KICAD_STALE_CAPTIONS:
+            continue
+
+        for previous in reversed(paragraphs[max(0, index - 4):index]):
+            if _paragraph_has_drawing(previous):
+                _remove_paragraph(previous)
+                break
+        _remove_paragraph(paragraph)
+
+
+def add_body_paragraph_after(doc: Document, anchor, text: str):
+    paragraph = doc.add_paragraph()
+    if "Body Text" in doc.styles:
+        paragraph.style = doc.styles["Body Text"]
+    run = paragraph.add_run(text)
+    east_asia, latin, size_pt, bold = paragraph_kind(paragraph)
+    set_run_visual(run, east_asia, latin, size_pt, bold)
+    anchor._element.addnext(paragraph._element)
+    return paragraph
+
+
+def move_last_paragraph_after(doc: Document, anchor):
+    paragraph = doc.paragraphs[-1]
+    anchor._element.addnext(paragraph._element)
+    return paragraph
+
+
+def add_picture_after(doc: Document, anchor, image_path: Path, width_inches: float):
+    if not image_path.exists():
+        raise FileNotFoundError(image_path)
+    picture_paragraph = doc.add_paragraph()
+    picture_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    picture_paragraph.add_run().add_picture(str(image_path), width=Inches(width_inches))
+    moved = move_last_paragraph_after(doc, anchor)
+    return moved
+
+
+def add_caption_after(doc: Document, anchor, caption: str):
+    caption_paragraph = doc.add_paragraph()
+    if "Caption" in doc.styles:
+        caption_paragraph.style = doc.styles["Caption"]
+    caption_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = caption_paragraph.add_run(caption)
+    set_run_visual(run, "宋体", "Times New Roman", 10.5, False)
+    normalize_caption_run(run)
+    moved = move_last_paragraph_after(doc, anchor)
+    return moved
+
+
+def insert_kicad_local_figures(doc: Document) -> None:
+    remove_stale_kicad_figure_blocks(doc)
+    inserted: set[str] = set()
+
+    for anchor_prefix, items in KICAD_LOCAL_FIGURE_INSERTIONS:
+        anchor = next((p for p in doc.paragraphs if paragraph_contains_after(p, anchor_prefix)), None)
+        if anchor is None:
+            raise RuntimeError(f"找不到图3.5局部截图插入锚点: {anchor_prefix}")
+
+        current = anchor
+        for caption, explanation in items:
+            source, width = KICAD_LOCAL_FIGURE_BY_CAPTION[caption]
+            picture = add_picture_after(doc, current, source, width)
+            caption_paragraph = add_caption_after(doc, picture, caption)
+            current = add_body_paragraph_after(doc, caption_paragraph, explanation)
+            inserted.add(caption)
+
+    expected = set(KICAD_LOCAL_FIGURE_BY_CAPTION)
+    if inserted != expected:
+        raise RuntimeError(f"图3.5局部截图插入不完整: inserted={sorted(inserted)}, expected={sorted(expected)}")
+
+
 def _image_size(path: Path) -> tuple[int, int]:
     from PIL import Image
 
@@ -474,10 +673,11 @@ def render_engineering_source(source: Path, target: Path) -> Path:
     return target
 
 
-def prepare_engineering_figure_assets() -> dict[str, Path]:
+def prepare_engineering_figure_assets(figures: dict[str, Path] | None = None) -> dict[str, Path]:
     ENGINEERING_RENDER_DIR.mkdir(parents=True, exist_ok=True)
     rendered: dict[str, Path] = {}
-    for index, (caption, source) in enumerate(ENGINEERING_FIGURES.items(), start=1):
+    selected_figures = figures or ENGINEERING_FIGURES
+    for index, (caption, source) in enumerate(selected_figures.items(), start=1):
         if not source.exists():
             raise FileNotFoundError(f"engineering figure missing for {caption}: {source}")
         target = ENGINEERING_RENDER_DIR / f"figure_{index:02d}_{source.stem}.png"
@@ -552,7 +752,7 @@ def _inline_extent_for_blip(blip) -> tuple[int, int] | None:
 
 
 def replace_engineering_figure_media() -> None:
-    figure_assets = prepare_engineering_figure_assets()
+    figure_assets = prepare_engineering_figure_assets(REPLACE_EXISTING_ENGINEERING_FIGURES)
 
     tmp = OUT.with_suffix(".figures.tmp.docx")
     replaced: set[str] = set()
@@ -577,7 +777,7 @@ def replace_engineering_figure_media() -> None:
             _set_inline_image_aspect(blip, figure)
             replaced.add(caption)
 
-        if replaced != set(ENGINEERING_FIGURES):
+        if replaced != set(REPLACE_EXISTING_ENGINEERING_FIGURES):
             raise RuntimeError(f"not all engineering figures replaced: {sorted(replaced)}")
 
         patched_document = etree.tostring(document_root, xml_declaration=True, encoding="UTF-8", standalone=True)
@@ -588,6 +788,73 @@ def replace_engineering_figure_media() -> None:
                     data = patched_document
                 elif item.filename in media_replacements:
                     data = media_replacements[item.filename]
+                zout.writestr(item, data)
+    tmp.replace(OUT)
+
+
+def _relationship_target_zip_name(rels_name: str, target: str) -> str:
+    if target.startswith("/") or "://" in target:
+        return _target_zip_name(target)
+    source_dir = posixpath.dirname(posixpath.dirname(rels_name))
+    return posixpath.normpath(posixpath.join(source_dir, target))
+
+
+def remove_unused_document_media() -> None:
+    """Drop image relationships/files that were left behind after deleting stale figure paragraphs."""
+    tmp = OUT.with_suffix(".media-clean.tmp.docx")
+    with ZipFile(OUT, "r") as zin:
+        document_root = etree.fromstring(zin.read("word/document.xml"))
+        rels_root = etree.fromstring(zin.read("word/_rels/document.xml.rels"))
+        used_rids = {
+            blip.get(f"{{{R_NS}}}embed")
+            for blip in document_root.xpath(".//a:blip", namespaces=NS)
+            if blip.get(f"{{{R_NS}}}embed")
+        }
+        removed_targets: set[str] = set()
+        changed = False
+        for rel in list(rels_root.xpath(".//rel:Relationship", namespaces=NS)):
+            rel_id = rel.get("Id")
+            rel_type = rel.get("Type") or ""
+            target = rel.get("Target") or ""
+            if "/image" not in rel_type or rel_id in used_rids:
+                continue
+            removed_targets.add(_relationship_target_zip_name("word/_rels/document.xml.rels", target))
+            rel.getparent().remove(rel)
+            changed = True
+
+        if not changed:
+            return
+
+        kept_targets: set[str] = set()
+        rels_payloads: dict[str, bytes] = {
+            "word/_rels/document.xml.rels": etree.tostring(
+                rels_root,
+                xml_declaration=True,
+                encoding="UTF-8",
+                standalone=True,
+            )
+        }
+        for item in zin.infolist():
+            if not item.filename.endswith(".rels") or item.filename == "word/_rels/document.xml.rels":
+                continue
+            root = etree.fromstring(zin.read(item.filename))
+            for rel in root.xpath(".//rel:Relationship", namespaces=NS):
+                rel_type = rel.get("Type") or ""
+                target = rel.get("Target") or ""
+                if "/image" in rel_type and target:
+                    kept_targets.add(_relationship_target_zip_name(item.filename, target))
+        for rel in rels_root.xpath(".//rel:Relationship", namespaces=NS):
+            rel_type = rel.get("Type") or ""
+            target = rel.get("Target") or ""
+            if "/image" in rel_type and target:
+                kept_targets.add(_relationship_target_zip_name("word/_rels/document.xml.rels", target))
+
+        removable_targets = removed_targets - kept_targets
+        with ZipFile(tmp, "w", ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                if item.filename in removable_targets:
+                    continue
+                data = rels_payloads.get(item.filename) or zin.read(item.filename)
                 zout.writestr(item, data)
     tmp.replace(OUT)
 
@@ -641,10 +908,18 @@ def verify_engineering_figure_assets(docx_path: Path | None = None) -> dict[str,
     """Verify that required engineering captions point to the real source assets."""
     target_docx = docx_path or OUT
     figure_assets = prepare_engineering_figure_assets()
+    full_schematic_hash = _sha256(KICAD_FULL_SCHEMATIC_SOURCE.read_bytes())
 
     media_targets = _engineering_figure_media_targets(target_docx)
     display_extents = _engineering_figure_display_extents(target_docx)
     with ZipFile(target_docx, "r") as archive:
+        embedded_media_hashes = {
+            _sha256(archive.read(name))
+            for name in archive.namelist()
+            if name.startswith("word/media/")
+        }
+        if full_schematic_hash in embedded_media_hashes:
+            raise RuntimeError("full KiCad schematic is still embedded; expected localized 图3.5 crop screenshots only")
         for caption, figure in figure_assets.items():
             media_name = media_targets.get(caption)
             if not media_name:
@@ -662,6 +937,8 @@ def verify_engineering_figure_assets(docx_path: Path | None = None) -> dict[str,
                     f"engineering figure is too small on page for {caption}: "
                     f"height_emu={cy}, expected>={ENGINEERING_MIN_IMAGE_HEIGHT_EMU}"
                 )
+    if "图3.5 KiCad元器件连线原理图" in document_text(target_docx):
+        raise RuntimeError("stale whole-schematic 图3.5 caption remains in DOCX")
     return media_targets
 
 
@@ -730,6 +1007,7 @@ def normalize_docx_with_python_docx() -> None:
     insert_bridge_paragraphs(doc)
     rename_engineering_captions(doc)
     apply_text_replacements(doc)
+    insert_kicad_local_figures(doc)
     normalize_caption_style(doc)
 
     for style in doc.styles:
@@ -778,6 +1056,7 @@ def normalize_docx_with_python_docx() -> None:
 
     restore_cover_template_style(doc)
     doc.save(str(OUT))
+    remove_unused_document_media()
     replace_engineering_figure_media()
 
 
@@ -1169,7 +1448,7 @@ def verify_blank_scan_contract(blank_suspects: list[dict]) -> None:
         raise RuntimeError(f"unexpected blank-scan pages: {sorted(unexpected)}")
     if 90 in pages:
         raise RuntimeError("reference orphan tail page returned at page 90")
-    if len(blank_suspects) > 7:
+    if len(blank_suspects) > len(ALLOWED_BLANK_PAGES):
         raise RuntimeError(f"blank suspects increased: {len(blank_suspects)}")
 
 

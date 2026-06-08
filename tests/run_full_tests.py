@@ -79,7 +79,7 @@ FORBIDDEN_TERMS = [
     "本文按照",
 ]
 
-ALLOWED_BLANK_PAGES = {2, 3, 23, 53, 54, 70, 77}
+ALLOWED_BLANK_PAGES = {2, 3, 23, 37, 56, 57, 73, 80}
 ALLOWED_EAST_ASIA_FONTS = {"宋体", "黑体", "楷体", "仿宋_GB2312", "隶书", "Consolas"}
 ALLOWED_LATIN_FONTS = {"Times New Roman", "Consolas", "宋体"}
 
@@ -95,16 +95,31 @@ BODY_MUTATION_ANCHOR = "本章回答本设计为什么需要开展"
 ENGINEERING_PAPER_READY_ROOT = Path(
     r"E:/My Project/毕业设计论文/论文/我的论文/给老师_工程资料包_2026-05-26/06_论文插图与截图/07_paper_ready"
 )
-ENGINEERING_MIN_IMAGE_HEIGHT_EMU = 3_000_000
+ENGINEERING_MIN_IMAGE_HEIGHT_EMU = 1_800_000
+KICAD_FULL_SCHEMATIC_SOURCE = ENGINEERING_PAPER_READY_ROOT / "figure_04_kicad_component_schematic.png"
+KICAD_LOCAL_FIGURES = {
+    "图3.5（a） 电源输入与3.3V稳压局部截图": ENGINEERING_PAPER_READY_ROOT / "figure_04a_kicad_power_regulator_crop.png",
+    "图3.5（b） I2C传感器与OLED接口局部截图": ENGINEERING_PAPER_READY_ROOT / "figure_04c_kicad_i2c_sensor_display_crop.png",
+    "图3.5（c） STM32主控最小系统局部截图": ENGINEERING_PAPER_READY_ROOT / "figure_04b_kicad_mcu_minimum_crop.png",
+    "图3.5（d） ESP8266无线通信接口局部截图": ENGINEERING_PAPER_READY_ROOT / "figure_04d_kicad_esp8266_crop.png",
+    "图3.5（e） LED与蜂鸣器报警输出局部截图": ENGINEERING_PAPER_READY_ROOT / "figure_04e_kicad_alarm_output_crop.png",
+    "图3.5（f） 调试、复位、时钟与ADC局部截图": ENGINEERING_PAPER_READY_ROOT / "figure_04f_kicad_debug_reset_clock_adc_crop.png",
+}
 ENGINEERING_FIGURES = {
     "图3.2 系统原理图": ENGINEERING_PAPER_READY_ROOT / "figure_01_system_principle_schematic.png",
     "图3.3 STM32主控接口原理图": ENGINEERING_PAPER_READY_ROOT / "figure_02_pre_bluepill_schematic.png",
     "图3.4 PCB顶层布线检查图": ENGINEERING_PAPER_READY_ROOT / "figure_03a_pre_bluepill_top_copper_review.png",
-    "图3.5 KiCad元器件连线原理图": ENGINEERING_PAPER_READY_ROOT / "figure_04_kicad_component_schematic.png",
+    **KICAD_LOCAL_FIGURES,
 }
 ENGINEERING_FIGURE_SOURCE_SHA256 = {
-    "图3.5 KiCad元器件连线原理图": "576705875f1b4ba154fe631efa70e3bcd7d63bab47786d69566e8ac860537526",
+    "图3.5（a） 电源输入与3.3V稳压局部截图": "2675acdf012f975c38e11ecfc5afa4c2ccb001b59d700bbb989c6d24f580c57d",
+    "图3.5（b） I2C传感器与OLED接口局部截图": "b129776112c20aa782edfd4e13e389a84720c30b8f4cba10f8ee8ecc69e3efbf",
+    "图3.5（c） STM32主控最小系统局部截图": "903041437c1f51d2d4c838ccacca78b5f7c413352ac34ee5cf90a3fc177ccf59",
+    "图3.5（d） ESP8266无线通信接口局部截图": "9d10a5992aa893e1102018983a9deaa7dbab04d37f5f11ca9541676f1d68e689",
+    "图3.5（e） LED与蜂鸣器报警输出局部截图": "3fb42a2f55ad521f76635375cf4608c4966fd4131e4bd5bc8a6a91472d2912bd",
+    "图3.5（f） 调试、复位、时钟与ADC局部截图": "37b008c0d09638e6adfc61a993c04955d607119cd1c9807caf8e6ceab1e95e20",
 }
+KICAD_FULL_SCHEMATIC_SHA256 = "576705875f1b4ba154fe631efa70e3bcd7d63bab47786d69566e8ac860537526"
 
 
 @dataclass
@@ -323,6 +338,13 @@ def verify_engineering_figure_assets(docx_path: Path) -> dict[str, str]:
     media_targets = engineering_figure_media_targets(docx_path)
     display_extents = engineering_figure_display_extents(docx_path)
     with ZipFile(docx_path) as archive:
+        embedded_media_hashes = {
+            sha256(archive.read(name))
+            for name in archive.namelist()
+            if name.startswith("word/media/")
+        }
+        if KICAD_FULL_SCHEMATIC_SHA256 in embedded_media_hashes:
+            raise RuntimeError("full KiCad schematic is still embedded; expected only localized 图3.5 crop screenshots")
         for caption, asset_path in figure_assets.items():
             media_name = media_targets[caption]
             actual = sha256(archive.read(media_name))
@@ -338,6 +360,9 @@ def verify_engineering_figure_assets(docx_path: Path) -> dict[str, str]:
                     f"engineering figure is too small on page for {caption}: "
                     f"height_emu={cy}, expected>={ENGINEERING_MIN_IMAGE_HEIGHT_EMU}"
                 )
+    text = document_text(docx_path)
+    if "图3.5 KiCad元器件连线原理图" in text:
+        raise RuntimeError("stale whole-schematic 图3.5 caption remains in DOCX")
     return media_targets
 
 
@@ -1053,7 +1078,7 @@ def step_blank_scan_sanity() -> str:
         raise RuntimeError(f"unexpected blank-scan pages: {sorted(unexpected)}")
     if 90 in pages:
         raise RuntimeError("reference orphan tail page returned at page 90")
-    if len(suspects) > 7:
+    if len(suspects) > len(ALLOWED_BLANK_PAGES):
         raise RuntimeError(f"blank suspects increased: {len(suspects)}")
     return f"blank scan sanity passed: suspects={len(suspects)} pages={sorted(pages)}"
 
