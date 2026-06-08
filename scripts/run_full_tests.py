@@ -7,11 +7,12 @@ Run from anywhere:
 What it covers:
 - Python syntax/bytecode compilation
 - built-in unit contracts for rules and preset loading
-- v014 DOCX regeneration through the canonical delivery builder
-- NCWU checker pass on v014
+- DOCX mutation regressions proving key rules fail on real broken documents
+- latest DOCX regeneration through the canonical delivery builder
+- NCWU checker pass on the newly generated version
 - first-page cover contract against the school literature-review template
 - color-consistency regression check against v011
-- v014 visual audit and blank-scan sanity checks
+- latest visual audit and blank-scan sanity checks
 """
 
 from __future__ import annotations
@@ -20,8 +21,10 @@ import contextlib
 import io
 import json
 import os
+import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from zipfile import ZipFile
@@ -34,19 +37,20 @@ from docx.oxml.ns import qn
 ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = ROOT / "src"
 DOWNLOADS = Path(r"C:/Users/ASUS-KL/Downloads")
-ORIGINAL = DOWNLOADS / "202213210刘高朋修改迭代版.docx"
+DOCX_STEM = "202213210刘高朋修改迭代版"
+VERSIONED_DOCX_RE = re.compile(rf"^{re.escape(DOCX_STEM)}_v(\d{{3}})_(.+)\.docx$")
+ORIGINAL = DOWNLOADS / f"{DOCX_STEM}.docx"
 V011 = DOWNLOADS / "202213210刘高朋修改迭代版_v011_格式统一交付版.docx"
-V012 = DOWNLOADS / "202213210刘高朋修改迭代版_v012_全篇黑色字体统一版.docx"
-V013 = DOWNLOADS / "202213210刘高朋修改迭代版_v013_阅读节奏优化版.docx"
-V014 = DOWNLOADS / "202213210刘高朋修改迭代版_v014_封面模板修正版.docx"
-V014_PDF = DOWNLOADS / "202213210刘高朋修改迭代版_v014_封面模板修正版.pdf"
-V014_REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v014_格式检测报告.md"
-V014_BLANK_REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v014_留白扫描.json"
-VERSION_LOG = DOWNLOADS / "202213210刘高朋修改迭代版_版本记录.md"
+VERSION_LOG = DOWNLOADS / f"{DOCX_STEM}_版本记录.md"
 EXPECTED_HEADER = "华北水利水电大学毕业设计"
 COVER_TEMPLATE = DOWNLOADS / "202213210刘高朋_文献综述_标准模板版.docx"
 COVER_TITLE = "毕业设计（论文）"
-W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+W_URI = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+R_URI = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+W_NS = f"{{{W_URI}}}"
+
+ET.register_namespace("w", W_URI)
+ET.register_namespace("r", R_URI)
 
 FORBIDDEN_TERMS = [
     "代码截图",
@@ -86,8 +90,65 @@ class StepResult:
     detail: str = ""
 
 
+ACTIVE_SOURCE_DOCX: Path | None = None
+ACTIVE_DOCX: Path | None = None
+ACTIVE_PDF: Path | None = None
+ACTIVE_REPORT: Path | None = None
+ACTIVE_BLANK_REPORT: Path | None = None
+
+
 def run_command(args: list[str], *, cwd: Path = ROOT) -> None:
     subprocess.run(args, cwd=str(cwd), check=True)
+
+
+def versioned_docx_candidates() -> list[tuple[int, str, Path]]:
+    candidates: list[tuple[int, str, Path]] = []
+    for path in DOWNLOADS.glob(f"{DOCX_STEM}_v*.docx"):
+        match = VERSIONED_DOCX_RE.match(path.name)
+        if not match:
+            continue
+        candidates.append((int(match.group(1)), match.group(2), path))
+    return sorted(candidates, key=lambda item: item[0])
+
+
+def version_info(path: Path) -> tuple[int, str]:
+    match = VERSIONED_DOCX_RE.match(path.name)
+    if not match:
+        raise RuntimeError(f"not a versioned thesis DOCX: {path}")
+    return int(match.group(1)), match.group(2)
+
+
+def related_delivery_paths(docx_path: Path) -> tuple[Path, Path, Path]:
+    version, _label = version_info(docx_path)
+    pdf = docx_path.with_suffix(".pdf")
+    report = DOWNLOADS / f"{DOCX_STEM}_v{version:03d}_格式检测报告.md"
+    blank_report = DOWNLOADS / f"{DOCX_STEM}_v{version:03d}_留白扫描.json"
+    return pdf, report, blank_report
+
+
+def set_active_delivery(source_docx: Path, output_docx: Path) -> None:
+    global ACTIVE_SOURCE_DOCX, ACTIVE_DOCX, ACTIVE_PDF, ACTIVE_REPORT, ACTIVE_BLANK_REPORT
+    ACTIVE_SOURCE_DOCX = source_docx
+    ACTIVE_DOCX = output_docx
+    ACTIVE_PDF, ACTIVE_REPORT, ACTIVE_BLANK_REPORT = related_delivery_paths(output_docx)
+
+
+def require_active_docx() -> Path:
+    if ACTIVE_DOCX is None:
+        raise RuntimeError("active delivery DOCX is not set; regenerate step must run first")
+    return ACTIVE_DOCX
+
+
+def require_active_source_docx() -> Path:
+    if ACTIVE_SOURCE_DOCX is None:
+        raise RuntimeError("active source DOCX is not set; regenerate step must run first")
+    return ACTIVE_SOURCE_DOCX
+
+
+def require_active_related_paths() -> tuple[Path, Path, Path]:
+    if ACTIVE_PDF is None or ACTIVE_REPORT is None or ACTIVE_BLANK_REPORT is None:
+        raise RuntimeError("active delivery related paths are not set; regenerate step must run first")
+    return ACTIVE_PDF, ACTIVE_REPORT, ACTIVE_BLANK_REPORT
 
 
 def document_text(path: Path) -> str:
@@ -123,6 +184,144 @@ def iter_direct_run_fonts(path: Path):
                     "ascii": fonts.get(f"{W_NS}ascii"),
                     "hansi": fonts.get(f"{W_NS}hAnsi"),
                 }
+
+
+def xml_bytes(root: ET.Element) -> bytes:
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def mutate_docx_xml(src: Path, dst: Path, mutator) -> list[str]:
+    """Copy a DOCX and mutate selected XML parts inside the ZIP package."""
+    changed_parts: list[str] = []
+    with ZipFile(src, "r") as zin, ZipFile(dst, "w") as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            new_data, changed = mutator(item.filename, data)
+            if changed:
+                changed_parts.append(item.filename)
+            zout.writestr(item, new_data)
+    if not changed_parts:
+        raise RuntimeError(f"DOCX mutation changed no XML parts for {dst.name}")
+    return changed_parts
+
+
+def append_docx_paragraph(document_xml: bytes, text: str) -> tuple[bytes, bool]:
+    root = ET.fromstring(document_xml)
+    body = root.find(f"{W_NS}body")
+    if body is None:
+        return document_xml, False
+    paragraph = ET.Element(f"{W_NS}p")
+    run = ET.SubElement(paragraph, f"{W_NS}r")
+    text_node = ET.SubElement(run, f"{W_NS}t")
+    text_node.text = text
+    children = list(body)
+    section_index = next((i for i, child in enumerate(children) if child.tag == f"{W_NS}sectPr"), len(children))
+    body.insert(section_index, paragraph)
+    return xml_bytes(root), True
+
+
+def remove_header_borders(name: str, data: bytes) -> tuple[bytes, bool]:
+    if not name.startswith("word/header") or not name.endswith(".xml"):
+        return data, False
+    root = ET.fromstring(data)
+    changed = False
+    for ppr in root.findall(f".//{W_NS}pPr"):
+        for child in list(ppr):
+            if child.tag == f"{W_NS}pBdr":
+                ppr.remove(child)
+                changed = True
+    return (xml_bytes(root), True) if changed else (data, False)
+
+
+def remove_toc_dot_leaders(name: str, data: bytes) -> tuple[bytes, bool]:
+    if name != "word/document.xml":
+        return data, False
+    root = ET.fromstring(data)
+    changed = False
+    for tab in root.findall(f".//{W_NS}tab"):
+        if tab.get(f"{W_NS}leader") == "dot":
+            tab.set(f"{W_NS}leader", "none")
+            changed = True
+    return (xml_bytes(root), True) if changed else (data, False)
+
+
+def break_body_page_number_format(name: str, data: bytes) -> tuple[bytes, bool]:
+    if name != "word/document.xml":
+        return data, False
+    root = ET.fromstring(data)
+    sections = root.findall(f".//{W_NS}sectPr")
+    if not sections:
+        return data, False
+    body_section = sections[-1]
+    pg_num_type = body_section.find(f"{W_NS}pgNumType")
+    if pg_num_type is None:
+        pg_num_type = ET.SubElement(body_section, f"{W_NS}pgNumType")
+    pg_num_type.set(f"{W_NS}fmt", "lowerRoman")
+    pg_num_type.set(f"{W_NS}start", "3")
+    return xml_bytes(root), True
+
+
+def break_frontmatter_roman_numbering(name: str, data: bytes) -> tuple[bytes, bool]:
+    if name != "word/document.xml":
+        return data, False
+    root = ET.fromstring(data)
+    changed = False
+    for pg_num_type in root.findall(f".//{W_NS}pgNumType"):
+        if pg_num_type.get(f"{W_NS}fmt") == "lowerRoman":
+            pg_num_type.set(f"{W_NS}fmt", "decimal")
+            changed = True
+    return (xml_bytes(root), True) if changed else (data, False)
+
+
+def remove_first_line_indent(name: str, data: bytes) -> tuple[bytes, bool]:
+    if name not in {"word/styles.xml", "word/document.xml"}:
+        return data, False
+    root = ET.fromstring(data)
+    changed = False
+    for ind in root.findall(f".//{W_NS}ind"):
+        if ind.get(f"{W_NS}firstLine") is not None:
+            ind.set(f"{W_NS}firstLine", "0")
+            changed = True
+    return (xml_bytes(root), True) if changed else (data, False)
+
+
+def add_cover_footer_page_number(name: str, data: bytes) -> tuple[bytes, bool]:
+    if not name.startswith("word/footer") or not name.endswith(".xml"):
+        return data, False
+    root = ET.fromstring(data)
+    paragraph = ET.SubElement(root, f"{W_NS}p")
+    ppr = ET.SubElement(paragraph, f"{W_NS}pPr")
+    jc = ET.SubElement(ppr, f"{W_NS}jc")
+    jc.set(f"{W_NS}val", "center")
+    run = ET.SubElement(paragraph, f"{W_NS}r")
+    text_node = ET.SubElement(run, f"{W_NS}t")
+    text_node.text = "1"
+    return xml_bytes(root), True
+
+
+def add_isolated_figure_caption(name: str, data: bytes) -> tuple[bytes, bool]:
+    if name != "word/document.xml":
+        return data, False
+    return append_docx_paragraph(data, "图 9.99 错误图题")
+
+
+def add_isolated_table_caption(name: str, data: bytes) -> tuple[bytes, bool]:
+    if name != "word/document.xml":
+        return data, False
+    return append_docx_paragraph(data, "表 9.99 错误表题")
+
+
+def remove_table_cant_split(name: str, data: bytes) -> tuple[bytes, bool]:
+    if name != "word/document.xml":
+        return data, False
+    root = ET.fromstring(data)
+    changed = False
+    for trpr in root.findall(f".//{W_NS}trPr"):
+        for child in list(trpr):
+            if child.tag == f"{W_NS}cantSplit":
+                trpr.remove(child)
+                changed = True
+    return (xml_bytes(root), True) if changed else (data, False)
 
 
 def run_size_pt(run) -> float | None:
@@ -163,19 +362,16 @@ def step_unit_contracts() -> str:
     from thesis_format_checker.rules import RULES
     from thesis_format_checker.checker import load_preset
 
-    expected_rules = {
-        "page-margins", "header-text-match", "header-on-all-sections",
-        "body-font-size", "body-east-asia-font", "text-color-consistency",
-        "body-line-spacing", "heading1-style", "heading2-style",
-        "heading3-style", "heading-style-applied", "chapter-page-break",
-        "abstract-zh-length", "abstract-en-length", "foreign-translation-length",
-        "toc-present", "cover-fields",
+    preset = load_preset("ncwu")
+    enabled_preset_rules = {
+        item["id"]
+        for item in preset.get("rules", [])
+        if item.get("enabled", True)
     }
-    missing = expected_rules - set(RULES.keys())
+    missing = enabled_preset_rules - set(RULES.keys())
     if missing:
         raise RuntimeError(f"missing rule registrations: {sorted(missing)}")
 
-    preset = load_preset("ncwu")
     if preset["preset_id"] != "ncwu":
         raise RuntimeError(f"unexpected preset_id: {preset['preset_id']}")
     if preset["page"]["margin_cm"]["left"] != 3.0:
@@ -185,14 +381,61 @@ def step_unit_contracts() -> str:
     if preset["content"]["abstract_zh"]["min_chars"] != 500:
         raise RuntimeError("unexpected zh abstract threshold in preset")
 
-    return "rule registry and preset contracts passed"
+    return f"rule registry and preset contracts passed: enabled_rules={len(enabled_preset_rules)}"
 
 
-def step_regenerate_v014() -> str:
+def step_rule_regression_contracts() -> str:
+    if str(SRC_DIR) not in sys.path:
+        sys.path.insert(0, str(SRC_DIR))
+    from thesis_format_checker.checker import check, load_preset
+
+    active_docx = require_active_docx()
+    if not active_docx.exists():
+        raise RuntimeError(f"active DOCX missing before rule regression tests: {active_docx}")
+
+    preset = load_preset("ncwu")
+    regressions = [
+        ("header-underline", remove_header_borders),
+        ("toc-dotline", remove_toc_dot_leaders),
+        ("page-number-format", break_body_page_number_format),
+        ("page-number-roman-frontmatter", break_frontmatter_roman_numbering),
+        ("body-first-line-indent", remove_first_line_indent),
+        ("cover-no-page-number", add_cover_footer_page_number),
+        ("figure-caption-position", add_isolated_figure_caption),
+        ("table-caption-position", add_isolated_table_caption),
+        ("table-no-page-break", remove_table_cant_split),
+    ]
+
+    passed: list[str] = []
+    with tempfile.TemporaryDirectory(prefix="thesis-rule-regression-") as tmpdir:
+        tmp_root = Path(tmpdir)
+        for rule_id, mutator in regressions:
+            bad_docx = tmp_root / f"bad-{rule_id}.docx"
+            changed_parts = mutate_docx_xml(active_docx, bad_docx, mutator)
+            _docx, _content, findings = check(bad_docx, preset)
+            rule_ids = {finding.rule_id for finding in findings}
+            if rule_id not in rule_ids:
+                preview = "; ".join(f"{f.rule_id}: {f.message}" for f in findings[:6])
+                raise RuntimeError(
+                    f"{rule_id} did not trigger on mutated DOCX; "
+                    f"changed_parts={changed_parts}; findings={preview}"
+                )
+            passed.append(rule_id)
+
+    return f"mutated DOCX regressions passed: {', '.join(passed)}"
+
+
+def step_regenerate_latest() -> str:
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
     if str(SRC_DIR) not in sys.path:
         sys.path.insert(0, str(SRC_DIR))
+
+    before = versioned_docx_candidates()
+    if not before:
+        raise RuntimeError(f"no versioned source DOCX found in {DOWNLOADS}")
+    source_version, _source_label, source_docx = before[-1]
+
     from delivery import build_lgp_docx
 
     output = io.StringIO()
@@ -202,33 +445,49 @@ def step_regenerate_v014() -> str:
     except Exception:
         print(output.getvalue())
         raise
-    if not V014.exists():
-        raise RuntimeError(f"v014 DOCX missing after generation: {V014}")
-    return "generated v014 DOCX/PDF/report/blank-scan"
+
+    after = versioned_docx_candidates()
+    if not after:
+        raise RuntimeError("no versioned DOCX found after generation")
+    output_version, _output_label, output_docx = after[-1]
+    if output_version != source_version + 1:
+        raise RuntimeError(
+            f"delivery version did not auto-increment: source=v{source_version:03d}, latest=v{output_version:03d}"
+        )
+    if output_docx == source_docx:
+        raise RuntimeError("delivery builder reused the source DOCX path")
+    set_active_delivery(source_docx, output_docx)
+    return f"generated v{output_version:03d} from v{source_version:03d}: {output_docx.name}"
 
 
 def step_delivery_contract() -> str:
-    required = [ORIGINAL, V013, V014, V014_PDF, V014_REPORT, V014_BLANK_REPORT, VERSION_LOG]
+    active_docx = require_active_docx()
+    source_docx = require_active_source_docx()
+    active_pdf, active_report, active_blank_report = require_active_related_paths()
+    active_version, active_label = version_info(active_docx)
+    source_version, _source_label = version_info(source_docx)
+
+    required = [ORIGINAL, source_docx, active_docx, active_pdf, active_report, active_blank_report, VERSION_LOG]
     missing = [str(path) for path in required if not path.exists()]
     if missing:
         raise RuntimeError(f"missing delivery artifacts: {missing}")
-    if V014.suffix.lower() != ".docx":
-        raise RuntimeError(f"final artifact is not a DOCX: {V014}")
-    if "_v014_" not in V014.name:
-        raise RuntimeError(f"final DOCX is not versioned as v014: {V014.name}")
-    if ORIGINAL.name == V014.name:
+    if active_docx.suffix.lower() != ".docx":
+        raise RuntimeError(f"final artifact is not a DOCX: {active_docx}")
+    if active_version != source_version + 1:
+        raise RuntimeError(f"final DOCX is not next version: source=v{source_version:03d}, active=v{active_version:03d}")
+    if ORIGINAL.name == active_docx.name:
         raise RuntimeError("final DOCX overwrote the original filename")
 
     log_text = VERSION_LOG.read_text(encoding="utf-8")
-    if V014.name not in log_text or "v014 - 封面模板修正版" not in log_text:
-        raise RuntimeError("version log is missing current v014 delivery facts")
-    return "v014 DOCX/PDF/report/version-log artifacts present"
+    if active_docx.name not in log_text or f"v{active_version:03d} - {active_label}" not in log_text:
+        raise RuntimeError("version log is missing current delivery facts")
+    return f"v{active_version:03d} DOCX/PDF/report/version-log artifacts present"
 
 
 def step_cover_contract() -> str:
     if not COVER_TEMPLATE.exists():
         raise RuntimeError(f"cover reference template missing: {COVER_TEMPLATE}")
-    doc = Document(str(V014))
+    doc = Document(str(require_active_docx()))
     if len(doc.paragraphs) < 10 or not doc.tables:
         raise RuntimeError("cover structure is missing")
 
@@ -274,17 +533,18 @@ def step_cover_contract() -> str:
     return "cover matches historical template contract with main-thesis title"
 
 
-def step_check_v014() -> str:
+def step_check_latest() -> str:
     if str(SRC_DIR) not in sys.path:
         sys.path.insert(0, str(SRC_DIR))
     from thesis_format_checker.checker import check, load_preset
 
+    active_docx = require_active_docx()
     preset = load_preset("ncwu")
-    _docx, _content, findings = check(V014, preset)
+    _docx, _content, findings = check(active_docx, preset)
     if findings:
         detail = "; ".join(f"{f.rule_id}: {f.message}" for f in findings[:5])
-        raise RuntimeError(f"v014 checker findings={len(findings)} {detail}")
-    return "v014 checker findings=0"
+        raise RuntimeError(f"latest checker findings={len(findings)} {detail}")
+    return "latest checker findings=0"
 
 
 def step_content_integrity_contract() -> str:
@@ -292,8 +552,9 @@ def step_content_integrity_contract() -> str:
         sys.path.insert(0, str(SRC_DIR))
     from thesis_format_checker.checker import check, load_preset
 
+    active_docx = require_active_docx()
     preset = load_preset("ncwu")
-    _docx, content, _findings = check(V014, preset)
+    _docx, content, _findings = check(active_docx, preset)
     if content.abstract_zh_chars < 500:
         raise RuntimeError(f"zh abstract too short: {content.abstract_zh_chars}")
     if content.abstract_en_words < 300:
@@ -315,7 +576,7 @@ def step_content_integrity_contract() -> str:
 
 
 def step_header_contract() -> str:
-    doc = Document(str(V014))
+    doc = Document(str(require_active_docx()))
     headers = []
     for section in doc.sections:
         text = " ".join(paragraph.text.strip() for paragraph in section.header.paragraphs if paragraph.text.strip()).strip()
@@ -336,7 +597,8 @@ def step_font_contract() -> str:
         sys.path.insert(0, str(SRC_DIR))
     from thesis_format_checker.docx_inspector import inspect
 
-    docx = inspect(V014)
+    active_docx = require_active_docx()
+    docx = inspect(active_docx)
     style_expectations = {
         "Normal": ("宋体", "Times New Roman"),
         "Body Text": ("宋体", "Times New Roman"),
@@ -351,7 +613,7 @@ def step_font_contract() -> str:
             raise RuntimeError(f"{style_name} latin={style.latin}, expected {expected_latin}")
 
     bad_fonts = []
-    for item in iter_direct_run_fonts(V014):
+    for item in iter_direct_run_fonts(active_docx):
         ea = item["east_asia"]
         ascii_font = item["ascii"]
         hansi = item["hansi"]
@@ -369,7 +631,7 @@ def step_font_contract() -> str:
 
 
 def step_forbidden_terms_contract() -> str:
-    text = document_text(V014)
+    text = document_text(require_active_docx())
     hits = {term: text.count(term) for term in FORBIDDEN_TERMS if text.count(term)}
     if hits:
         raise RuntimeError(f"forbidden terms present: {hits}")
@@ -377,12 +639,14 @@ def step_forbidden_terms_contract() -> str:
 
 
 def step_image_table_contract() -> str:
-    before = Document(str(V013))
-    after = Document(str(V014))
+    source_docx = require_active_source_docx()
+    active_docx = require_active_docx()
+    before = Document(str(source_docx))
+    after = Document(str(active_docx))
     if len(after.inline_shapes) < len(before.inline_shapes):
-        raise RuntimeError(f"inline image count decreased: v013={len(before.inline_shapes)} v014={len(after.inline_shapes)}")
+        raise RuntimeError(f"inline image count decreased: source={len(before.inline_shapes)} output={len(after.inline_shapes)}")
     if len(after.tables) < len(before.tables):
-        raise RuntimeError(f"table count decreased: v013={len(before.tables)} v014={len(after.tables)}")
+        raise RuntimeError(f"table count decreased: source={len(before.tables)} output={len(after.tables)}")
     return f"images/tables preserved: images={len(after.inline_shapes)}, tables={len(after.tables)}"
 
 
@@ -406,14 +670,15 @@ def step_visual_audit() -> str:
 
     audit = build_lgp_docx.audit_visual_format()
     if audit["non_black_runs"] or audit["style_non_black"]:
-        raise RuntimeError(f"v014 color audit failed: {audit}")
+        raise RuntimeError(f"latest color audit failed: {audit}")
     return f"color audit passed: {audit}"
 
 
 def step_blank_scan_sanity() -> str:
-    if not V014_BLANK_REPORT.exists():
-        raise RuntimeError(f"blank scan report missing: {V014_BLANK_REPORT}")
-    suspects = json.loads(V014_BLANK_REPORT.read_text(encoding="utf-8"))
+    _active_pdf, _active_report, active_blank_report = require_active_related_paths()
+    if not active_blank_report.exists():
+        raise RuntimeError(f"blank scan report missing: {active_blank_report}")
+    suspects = json.loads(active_blank_report.read_text(encoding="utf-8"))
     pages = {item.get("page") for item in suspects}
     unexpected = pages - ALLOWED_BLANK_PAGES
     if unexpected:
@@ -447,10 +712,11 @@ def main() -> int:
     steps = [
         ("compileall", step_compileall),
         ("unit-contracts", step_unit_contracts),
-        ("regenerate-v014", step_regenerate_v014),
+        ("regenerate-latest", step_regenerate_latest),
         ("delivery-contract", step_delivery_contract),
         ("cover-contract", step_cover_contract),
-        ("check-v014", step_check_v014),
+        ("check-latest", step_check_latest),
+        ("rule-regression-contracts", step_rule_regression_contracts),
         ("content-integrity", step_content_integrity_contract),
         ("header-contract", step_header_contract),
         ("font-contract", step_font_contract),

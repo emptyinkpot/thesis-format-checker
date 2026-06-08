@@ -410,18 +410,71 @@ def check_cover_fields(docx, content, preset) -> list[Finding]:
 # --- NEW RULES: from 9-thesis analysis (2026-06-05) ---
 
 
+BODY_STYLE_NAMES = {"Normal", "Body Text"}
+
+
+def _expected_indent_twips(chars: int | float) -> int:
+    # The current NCWU delivery contract uses 420 twips for a 2-character first-line indent.
+    return int(round(float(chars) * 210))
+
+
+def _effective_first_line_indent_twips(docx, paragraph) -> int | None:
+    if paragraph.first_line_indent_twips is not None:
+        return paragraph.first_line_indent_twips
+    style = docx.styles.get(paragraph.style_name)
+    return getattr(style, "first_line_indent_twips", None) if style else None
+
+
+def _standard_figure_caption(text: str) -> bool:
+    return bool(FIGURE_CAPTION_RE_RULE.match(text.strip()))
+
+
+def _standard_table_caption(text: str) -> bool:
+    return bool(TABLE_CAPTION_RE_RULE.match(text.strip()))
+
+
+def _media_block_indices(docx) -> set[int]:
+    blocks = {
+        p.block_index for p in docx.paragraphs
+        if p.block_index is not None and p.has_drawing
+    }
+    blocks.update(t.block_index for t in docx.tables if t.block_index is not None)
+    return blocks
+
+
 @rule("body-first-line-indent", default_severity="warning")
 def check_body_first_line_indent(docx, content, preset) -> list[Finding]:
     expected_chars = preset.get("styles", {}).get("body", {}).get("first_line_indent_chars")
     if expected_chars is None:
         return []
-    normal = docx.styles.get("Normal")
-    if normal is None:
+    expected_twips = _expected_indent_twips(expected_chars)
+    min_twips = int(expected_twips * 0.85)
+    body_style = docx.styles.get("Body Text") or docx.styles.get("Normal")
+    style_indent = getattr(body_style, "first_line_indent_twips", None) if body_style else None
+    if style_indent is not None and style_indent >= min_twips:
         return []
-    # python-docx stores first_line_indent in EMU; 2 chars ≈ 480000 EMU (at 12pt)
-    # We check style-level only; run-level is too noisy
-    # For now just check if indent is defined at all via line_spacing proxy
-    # TODO: enhance docx_inspector to extract first_line_indent from pPr
+
+    body_paragraphs = [
+        p for p in docx.paragraphs
+        if p.style_name in BODY_STYLE_NAMES
+        and len(p.text.strip()) >= 20
+        and not p.has_drawing
+        and not _standard_figure_caption(p.text)
+        and not _standard_table_caption(p.text)
+    ][:80]
+    missing = [
+        p for p in body_paragraphs
+        if (_effective_first_line_indent_twips(docx, p) or 0) < min_twips
+    ]
+    if body_paragraphs and len(missing) / len(body_paragraphs) > 0.2:
+        return [Finding(
+            rule_id="body-first-line-indent",
+            message=f"正文首行缩进应约为 {expected_chars} 字符；抽样 {len(missing)}/{len(body_paragraphs)} 段不足",
+            expected=f">={min_twips} twips",
+            actual=f"style={style_indent}",
+            location="Body Text / 正文段落",
+            fixable=True,
+        )]
     return []
 
 
@@ -431,15 +484,50 @@ def check_page_number_format(docx, content, preset) -> list[Finding]:
     expected = preset.get("page", {}).get("page_number", {})
     if not expected:
         return []
-    # Check footer for page numbers in body sections
     findings = []
     body_format = expected.get("body_format", "arabic")
     body_position = expected.get("body_position", "center_bottom")
-    # Inspect last section (body) for footer content
-    if docx.sections:
-        last_sec = docx.sections[-1]
-        # We'd need footer inspection - for now flag if no footer text detected
-        # TODO: enhance docx_inspector to extract footer paragraphs
+    if not docx.sections:
+        return []
+    body_section = next((sec for sec in reversed(docx.sections) if sec.header_text), docx.sections[-1])
+    expected_xml_format = "decimal" if body_format == "arabic" else body_format
+    actual_format = body_section.page_number_format or "decimal"
+    if actual_format != expected_xml_format:
+        findings.append(Finding(
+            rule_id="page-number-format",
+            message=f"正文页码格式应为 {expected_xml_format}，实际 {actual_format}",
+            expected=expected_xml_format,
+            actual=actual_format,
+            location=f"Section {body_section.index}",
+            fixable=True,
+        ))
+    if body_section.page_number_start not in (1, None):
+        findings.append(Finding(
+            rule_id="page-number-format",
+            message=f"正文页码应从 1 开始，实际 start={body_section.page_number_start}",
+            expected=1,
+            actual=body_section.page_number_start,
+            location=f"Section {body_section.index}",
+            fixable=True,
+        ))
+    if not body_section.footer_has_page_number:
+        findings.append(Finding(
+            rule_id="page-number-format",
+            message="正文页脚未检测到页码域或页码文本",
+            expected="footer PAGE",
+            actual=body_section.footer_text,
+            location=f"Section {body_section.index}",
+            fixable=True,
+        ))
+    if body_position == "center_bottom" and body_section.footer_align != "center":
+        findings.append(Finding(
+            rule_id="page-number-format",
+            message=f"正文页码应在页脚居中，实际对齐 {body_section.footer_align}",
+            expected="center",
+            actual=body_section.footer_align,
+            location=f"Section {body_section.index}",
+            fixable=True,
+        ))
     return findings
 
 
@@ -449,10 +537,34 @@ def check_page_number_roman_frontmatter(docx, content, preset) -> list[Finding]:
     expected = preset.get("page", {}).get("page_number", {})
     if not expected.get("frontmatter_roman", False):
         return []
-    # Detect via section pgNumType in early sections
-    findings = []
-    # TODO: enhance docx_inspector to read pgNumType from sectPr
-    return findings
+    roman_sections = [
+        sec for sec in docx.sections
+        if sec.page_number_format in {"lowerRoman", "upperRoman"}
+    ]
+    if not roman_sections:
+        return [Finding(
+            rule_id="page-number-roman-frontmatter",
+            message="前置部分未检测到罗马数字页码节",
+            expected="lowerRoman",
+            actual=[s.page_number_format for s in docx.sections],
+            location="Sections",
+            fixable=True,
+        )]
+    bad = [
+        sec for sec in roman_sections
+        if sec.page_number_format != "lowerRoman" or sec.page_number_start not in (1, None)
+    ]
+    return [
+        Finding(
+            rule_id="page-number-roman-frontmatter",
+            message=f"前置页码应为小写罗马数字并从 1 开始，Section {sec.index} 实际 fmt={sec.page_number_format}, start={sec.page_number_start}",
+            expected={"fmt": "lowerRoman", "start": 1},
+            actual={"fmt": sec.page_number_format, "start": sec.page_number_start},
+            location=f"Section {sec.index}",
+            fixable=True,
+        )
+        for sec in bad
+    ]
 
 
 @rule("header-underline", default_severity="warning")
@@ -460,9 +572,18 @@ def check_header_underline(docx, content, preset) -> list[Finding]:
     """页眉下方应有细横线。"""
     if not preset.get("page", {}).get("header_underline", False):
         return []
-    # python-docx can detect paragraph border on header paragraph
-    # TODO: implement via header paragraph bottom border check
-    return []
+    findings = []
+    for sec in docx.sections:
+        if sec.header_text and not sec.header_has_bottom_border:
+            findings.append(Finding(
+                rule_id="header-underline",
+                message=f"Section {sec.index} 页眉缺少下划线/底边框",
+                expected="header paragraph bottom border",
+                actual=False,
+                location=f"Section {sec.index}",
+                fixable=True,
+            ))
+    return findings
 
 
 @rule("header-frontmatter-excluded", default_severity="warning")
@@ -580,13 +701,17 @@ def check_toc_title_spacing(docx, content, preset) -> list[Finding]:
 @rule("toc-dotline", default_severity="info")
 def check_toc_dotline(docx, content, preset) -> list[Finding]:
     """目录条目应有点线连接页码。"""
-    # This requires inspecting tab leaders in TOC paragraphs
-    # python-docx can read tab stops with leader attributes
-    # For now, presence check only via content
     if not preset.get("content", {}).get("toc", {}).get("dotline", False):
         return []
-    # SDT TOC usually has tab leaders - hard to verify without deeper XML parse
-    # TODO: implement via SDT body paragraph tab leader inspection
+    if content.toc_present and getattr(docx, "toc_dot_leader_count", 0) <= 0:
+        return [Finding(
+            rule_id="toc-dotline",
+            message="目录存在，但未检测到 tab leader=dot 的点线连接",
+            expected="w:tab w:leader='dot'",
+            actual=getattr(docx, "toc_dot_leader_count", 0),
+            location="word/document.xml",
+            fixable=True,
+        )]
     return []
 
 
@@ -599,16 +724,31 @@ def check_figure_caption_position(docx, content, preset) -> list[Finding]:
     """图题应在图下方（即图片段落之后）。"""
     if not preset.get("structure", {}).get("figure_caption_below", True):
         return []
-    # Check that figure captions come AFTER image paragraphs
-    # A figure caption appearing before any image in a sequence suggests wrong position
     findings = []
-    for i, p in enumerate(docx.paragraphs):
-        if FIGURE_CAPTION_RE_RULE.match(p.text.strip()):
-            # Check next paragraph - if it's an image, caption is ABOVE (wrong)
-            if i + 1 < len(docx.paragraphs):
-                next_p = docx.paragraphs[i + 1]
-                # Image paragraphs often have empty text with inline shapes
-                # This is a heuristic; real check needs inline shape detection
+    media_blocks = _media_block_indices(docx)
+    for p in docx.paragraphs:
+        text = p.text.strip()
+        if not _standard_figure_caption(text) or p.block_index is None:
+            continue
+        previous_media = [
+            block for block in media_blocks
+            if 0 < p.block_index - block <= 4
+        ]
+        if previous_media:
+            continue
+        next_media = [
+            block for block in media_blocks
+            if 0 < block - p.block_index <= 3
+        ]
+        relation = "题注在图上方" if next_media else "题注附近未找到图片/图形表格"
+        findings.append(Finding(
+            rule_id="figure-caption-position",
+            message=f"图题 {text[:30]!r} 应位于图下方，实际 {relation}",
+            expected="image/table block before caption",
+            actual={"caption_block": p.block_index, "near_next_media": next_media[:3]},
+            location=f"Paragraph {p.index}",
+            fixable=False,
+        ))
     return findings
 
 
@@ -617,9 +757,32 @@ def check_table_caption_position(docx, content, preset) -> list[Finding]:
     """表题应在表上方（即表格之前）。"""
     if not preset.get("structure", {}).get("table_caption_above", True):
         return []
-    # Heuristic: table captions should appear before table elements
-    # TODO: correlate table captions with actual table positions
-    return []
+    table_blocks = {t.block_index for t in docx.tables if t.block_index is not None}
+    findings = []
+    for p in docx.paragraphs:
+        text = p.text.strip()
+        if not _standard_table_caption(text) or p.block_index is None:
+            continue
+        next_tables = [
+            block for block in table_blocks
+            if 0 < block - p.block_index <= 2
+        ]
+        if next_tables:
+            continue
+        previous_tables = [
+            block for block in table_blocks
+            if 0 < p.block_index - block <= 2
+        ]
+        relation = "表题在表格下方" if previous_tables else "表题后未紧跟表格"
+        findings.append(Finding(
+            rule_id="table-caption-position",
+            message=f"表题 {text[:30]!r} 应位于表格上方，实际 {relation}",
+            expected="table block immediately after caption",
+            actual={"caption_block": p.block_index, "near_previous_tables": previous_tables[:3]},
+            location=f"Paragraph {p.index}",
+            fixable=False,
+        ))
+    return findings
 
 
 @rule("figure-table-numbering", default_severity="warning")
@@ -716,12 +879,30 @@ def check_reference_format(docx, content, preset) -> list[Finding]:
 @rule("cover-no-page-number", default_severity="info")
 def check_cover_no_page_number(docx, content, preset) -> list[Finding]:
     """封面/声明/授权页不应有页码。"""
-    # This is typically controlled by section page numbering settings
-    # and "different first page" flag
-    # TODO: check via sectPr pgNumType presence in first section
     if not preset.get("page", {}).get("page_number", {}).get("cover_excluded", True):
         return []
-    return []
+    if not docx.sections:
+        return []
+    first_visible_number_idx = next(
+        (
+            sec.index for sec in docx.sections
+            if sec.page_number_format in {"lowerRoman", "upperRoman", "decimal"}
+            and sec.page_number_start != 0
+        ),
+        next((sec.index for sec in docx.sections if sec.header_text), 1),
+    )
+    findings = []
+    for sec in docx.sections[:max(1, first_visible_number_idx)]:
+        if sec.footer_has_page_number or sec.footer_text.strip():
+            findings.append(Finding(
+                rule_id="cover-no-page-number",
+                message=f"封面/声明前置节不应显示页码，Section {sec.index} 页脚为 {sec.footer_text!r}",
+                expected="no footer page number",
+                actual={"footer_text": sec.footer_text, "has_page_number": sec.footer_has_page_number},
+                location=f"Section {sec.index}",
+                fixable=True,
+            ))
+    return findings
 
 
 @rule("chapter-numbering-arabic", default_severity="info")
@@ -872,12 +1053,33 @@ def check_reference_all_cited(docx, content, preset) -> list[Finding]:
 
 @rule("table-no-page-break", default_severity="info")
 def check_table_no_page_break(docx, content, preset) -> list[Finding]:
-    """表格和图不应被分页切断（检测表格紧邻段是否有分页）。"""
-    # Heuristic: if a paragraph right before a table has a page break,
-    # it might cause table to start at top of next page (acceptable).
-    # If a paragraph IN the middle of surrounding table context has break, flag.
-    # TODO: deeper implementation needs table row-level page break detection
-    return []
+    """正文表格行应设置不跨页断开。"""
+    if not preset.get("structure", {}).get("table_three_line", True):
+        return []
+    caption_blocks = {
+        p.block_index for p in docx.paragraphs
+        if p.block_index is not None and _standard_table_caption(p.text)
+    }
+    findings = []
+    for table in docx.tables:
+        if table.block_index is None:
+            continue
+        has_standard_caption = any(
+            0 < table.block_index - caption_block <= 2
+            for caption_block in caption_blocks
+        )
+        if not has_standard_caption:
+            continue
+        if not table.all_rows_cant_split:
+            findings.append(Finding(
+                rule_id="table-no-page-break",
+                message=f"表格 {table.index} 有 {len(table.rows_missing_cant_split)} 行缺少 w:cantSplit，可能被分页切断",
+                expected="all rows w:cantSplit",
+                actual=table.rows_missing_cant_split[:10],
+                location=f"Table {table.index}",
+                fixable=True,
+            ))
+    return findings
 
 
 @rule("code-block-length", default_severity="info")

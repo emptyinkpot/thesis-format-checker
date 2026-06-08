@@ -23,12 +23,14 @@ EMU_PER_CM = 360000
 @dataclass
 class StyleInfo:
     name: str
+    style_id: str | None = None
     east_asia: str | None = None
     latin: str | None = None
     size_pt: float | None = None
     bold: bool | None = None
     align: str | None = None
     line_spacing: float | None = None
+    first_line_indent_twips: int | None = None
     color: str | None = None
     theme_color: str | None = None
 
@@ -52,16 +54,28 @@ class SectionInfo:
     right_margin_cm: float
     header_text: str = ""
     header_linked_to_previous: bool = True
+    header_has_bottom_border: bool = False
+    header_align: str | None = None
+    header_size_pt: float | None = None
+    footer_text: str = ""
+    footer_align: str | None = None
+    footer_has_page_number: bool = False
+    page_number_format: str | None = None
+    page_number_start: int | None = None
 
 
 @dataclass
 class ParagraphInfo:
     index: int
+    block_index: int | None
     style_name: str
     text: str
     align: str | None
     page_break_before: bool
     has_page_break_run: bool
+    first_line_indent_twips: int | None
+    has_drawing: bool
+    has_toc_dot_leader: bool
     first_run_east_asia: str | None
     first_run_latin: str | None
     first_run_size_pt: float | None
@@ -73,10 +87,13 @@ class ParagraphInfo:
 @dataclass
 class TableInfo:
     index: int
+    block_index: int | None
     rows: int
     cols: int
     has_outer_border: bool
     has_internal_border: bool
+    all_rows_cant_split: bool
+    rows_missing_cant_split: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -87,6 +104,7 @@ class InspectResult:
     paragraphs: list[ParagraphInfo] = field(default_factory=list)
     tables: list[TableInfo] = field(default_factory=list)
     non_black_runs: list[RunColorInfo] = field(default_factory=list)
+    toc_dot_leader_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -96,6 +114,7 @@ class InspectResult:
             "paragraphs": [asdict(p) for p in self.paragraphs],
             "tables": [asdict(t) for t in self.tables],
             "non_black_runs": [asdict(r) for r in self.non_black_runs],
+            "toc_dot_leader_count": self.toc_dot_leader_count,
         }
 
 
@@ -162,6 +181,137 @@ def _extract_line_spacing(ppr) -> float | None:
     return line_val / 20.0
 
 
+def _extract_first_line_indent_twips(ppr) -> int | None:
+    if ppr is None:
+        return None
+    ind = ppr.find(qn("w:ind"))
+    if ind is None:
+        return None
+    first_line = ind.get(qn("w:firstLine"))
+    if first_line is None:
+        return None
+    try:
+        return int(first_line)
+    except ValueError:
+        return None
+
+
+def _extract_has_bottom_border(ppr) -> bool:
+    if ppr is None:
+        return False
+    border = ppr.find(qn("w:pBdr"))
+    if border is None:
+        return False
+    bottom = border.find(qn("w:bottom"))
+    if bottom is None:
+        return False
+    return bottom.get(qn("w:val")) not in (None, "none", "nil")
+
+
+def _extract_has_toc_dot_leader(ppr) -> bool:
+    if ppr is None:
+        return False
+    tabs = ppr.find(qn("w:tabs"))
+    if tabs is None:
+        return False
+    for tab in tabs.findall(qn("w:tab")):
+        if tab.get(qn("w:leader")) == "dot":
+            return True
+    return False
+
+
+def _has_drawing(paragraph_element) -> bool:
+    return bool(
+        paragraph_element.findall(".//" + qn("w:drawing"))
+        or paragraph_element.findall(".//" + qn("w:pict"))
+    )
+
+
+def _row_cant_split(row_element) -> bool:
+    tr_pr = row_element.find(qn("w:trPr"))
+    if tr_pr is None:
+        return False
+    cant_split = tr_pr.find(qn("w:cantSplit"))
+    if cant_split is None:
+        return False
+    val = cant_split.get(qn("w:val"))
+    return val not in ("0", "false")
+
+
+def _paragraph_text(paragraph_element) -> str:
+    return "".join(node.text or "" for node in paragraph_element.findall(".//" + qn("w:t"))).strip()
+
+
+def _paragraph_has_page_number(paragraph_element) -> bool:
+    for fld_simple in paragraph_element.findall(".//" + qn("w:fldSimple")):
+        instr = fld_simple.get(qn("w:instr")) or ""
+        if "PAGE" in instr.upper():
+            return True
+    for instr_text in paragraph_element.findall(".//" + qn("w:instrText")):
+        if "PAGE" in (instr_text.text or "").upper():
+            return True
+    text = _paragraph_text(paragraph_element)
+    return bool(re.fullmatch(r"\d+|[ivxlcdm]+", text.lower()))
+
+
+def _first_text_run_size_pt(paragraph) -> float | None:
+    for run in paragraph.runs:
+        if not (run.text or "").strip():
+            continue
+        rpr = run._r.find(qn("w:rPr"))
+        _ea, _latin, size_pt, _bold = _extract_font_from_rpr(rpr)
+        return size_pt
+    return None
+
+
+def _extract_section_page_numbers(sec) -> tuple[str | None, int | None]:
+    pg_num_type = sec._sectPr.find(qn("w:pgNumType"))
+    if pg_num_type is None:
+        return None, None
+    fmt = pg_num_type.get(qn("w:fmt"))
+    start_raw = pg_num_type.get(qn("w:start"))
+    try:
+        start = int(start_raw) if start_raw is not None else None
+    except ValueError:
+        start = None
+    return fmt, start
+
+
+def _extract_block_indices(doc) -> tuple[list[int | None], list[int | None]]:
+    paragraph_blocks: list[int | None] = []
+    table_blocks: list[int | None] = []
+    paragraph_index = 0
+    table_index = 0
+    for block_index, child in enumerate(doc.element.body.iterchildren()):
+        if child.tag == qn("w:p"):
+            paragraph_blocks.append(block_index)
+            paragraph_index += 1
+        elif child.tag == qn("w:tbl"):
+            table_blocks.append(block_index)
+            table_index += 1
+    if paragraph_index != len(doc.paragraphs):
+        paragraph_blocks = list(range(len(doc.paragraphs)))
+    if table_index != len(doc.tables):
+        table_blocks = list(range(len(doc.tables)))
+    return paragraph_blocks, table_blocks
+
+
+def _extract_toc_dot_leader_count_from_xml(path: Path) -> int:
+    count = 0
+    with ZipFile(path) as archive:
+        root = ET.fromstring(archive.read("word/document.xml"))
+    for paragraph in root.findall(".//" + W_NS + "p"):
+        ppr = paragraph.find(W_NS + "pPr")
+        if ppr is None:
+            continue
+        tabs = ppr.find(W_NS + "tabs")
+        if tabs is None:
+            continue
+        if any(tab.get(W_NS + "leader") == "dot" for tab in tabs.findall(W_NS + "tab")):
+            count += 1
+    return count
+
+
 def _extract_styles(doc) -> dict[str, StyleInfo]:
     out: dict[str, StyleInfo] = {}
     for style in doc.styles:
@@ -177,6 +327,7 @@ def _extract_styles(doc) -> dict[str, StyleInfo]:
         color, theme_color = _extract_color_from_rpr(rpr)
         align = _extract_alignment(ppr)
         line_sp = _extract_line_spacing(ppr)
+        first_line_indent = _extract_first_line_indent_twips(ppr)
         try:
             font_size = style.font.size
             if font_size is not None and size_pt is None:
@@ -185,12 +336,14 @@ def _extract_styles(doc) -> dict[str, StyleInfo]:
             pass
         out[style.name] = StyleInfo(
             name=style.name,
+            style_id=getattr(style, "style_id", None),
             east_asia=ea,
             latin=latin,
             size_pt=size_pt,
             bold=bold,
             align=align,
             line_spacing=line_sp,
+            first_line_indent_twips=first_line_indent,
             color=color,
             theme_color=theme_color,
         )
@@ -240,17 +393,38 @@ def _extract_sections(doc) -> list[SectionInfo]:
     sections = []
     for i, sec in enumerate(doc.sections):
         header_text = ""
+        header_has_bottom_border = False
+        header_align = None
+        header_size_pt = None
         try:
             for p in sec.header.paragraphs:
+                ppr = p._p.find(qn("w:pPr"))
+                if _extract_has_bottom_border(ppr):
+                    header_has_bottom_border = True
                 if p.text.strip():
                     header_text = p.text.strip()
+                    header_align = _extract_alignment(ppr)
+                    header_size_pt = _first_text_run_size_pt(p)
                     break
+        except Exception:
+            pass
+        footer_text = ""
+        footer_align = None
+        footer_has_page_number = False
+        try:
+            for p in sec.footer.paragraphs:
+                if _paragraph_has_page_number(p._p):
+                    footer_has_page_number = True
+                if p.text.strip() and not footer_text:
+                    footer_text = p.text.strip()
+                    footer_align = _extract_alignment(p._p.find(qn("w:pPr")))
         except Exception:
             pass
         try:
             linked = sec.header.is_linked_to_previous
         except Exception:
             linked = True
+        page_number_format, page_number_start = _extract_section_page_numbers(sec)
         sections.append(SectionInfo(
             index=i,
             page_width_cm=_emu_to_cm(sec.page_width),
@@ -261,16 +435,26 @@ def _extract_sections(doc) -> list[SectionInfo]:
             right_margin_cm=_emu_to_cm(sec.right_margin),
             header_text=header_text,
             header_linked_to_previous=linked,
+            header_has_bottom_border=header_has_bottom_border,
+            header_align=header_align,
+            header_size_pt=header_size_pt,
+            footer_text=footer_text,
+            footer_align=footer_align,
+            footer_has_page_number=footer_has_page_number,
+            page_number_format=page_number_format,
+            page_number_start=page_number_start,
         ))
     return sections
 
 
-def _extract_paragraphs(doc) -> list[ParagraphInfo]:
+def _extract_paragraphs(doc, paragraph_blocks: list[int | None]) -> list[ParagraphInfo]:
     paragraphs = []
     inline_ref_re = re.compile(r"\[\d+\]")
     for i, p in enumerate(doc.paragraphs):
         ppr = p._p.find(qn("w:pPr"))
         align = _extract_alignment(ppr)
+        first_line_indent = _extract_first_line_indent_twips(ppr)
+        has_toc_dot_leader = _extract_has_toc_dot_leader(ppr)
         page_break_before = False
         if ppr is not None:
             pbb = ppr.find(qn("w:pageBreakBefore"))
@@ -308,11 +492,15 @@ def _extract_paragraphs(doc) -> list[ParagraphInfo]:
                     break
         paragraphs.append(ParagraphInfo(
             index=i,
+            block_index=paragraph_blocks[i] if i < len(paragraph_blocks) else None,
             style_name=p.style.name if p.style else "Normal",
             text=p.text,
             align=align,
             page_break_before=page_break_before,
             has_page_break_run=has_page_break_run,
+            first_line_indent_twips=first_line_indent,
+            has_drawing=_has_drawing(p._p),
+            has_toc_dot_leader=has_toc_dot_leader,
             first_run_east_asia=ea,
             first_run_latin=latin,
             first_run_size_pt=size_pt,
@@ -323,7 +511,7 @@ def _extract_paragraphs(doc) -> list[ParagraphInfo]:
     return paragraphs
 
 
-def _extract_tables(doc) -> list[TableInfo]:
+def _extract_tables(doc, table_blocks: list[int | None]) -> list[TableInfo]:
     tables = []
     for i, t in enumerate(doc.tables):
         rows = len(t.rows)
@@ -342,9 +530,18 @@ def _extract_tables(doc) -> list[TableInfo]:
                     el = borders.find(qn(f"w:{tag}"))
                     if el is not None and el.get(qn("w:val")) not in (None, "none", "nil"):
                         has_internal = True
+        rows_missing_cant_split = [
+            row_index for row_index, row in enumerate(t._tbl.findall(qn("w:tr")))
+            if not _row_cant_split(row)
+        ]
         tables.append(TableInfo(
-            index=i, rows=rows, cols=cols,
+            index=i,
+            block_index=table_blocks[i] if i < len(table_blocks) else None,
+            rows=rows,
+            cols=cols,
             has_outer_border=has_outer, has_internal_border=has_internal,
+            all_rows_cant_split=len(rows_missing_cant_split) == 0,
+            rows_missing_cant_split=rows_missing_cant_split,
         ))
     return tables
 
@@ -353,11 +550,14 @@ def inspect(path: str | Path) -> InspectResult:
     """Inspect DOCX file and return raw format properties."""
     path = Path(path)
     doc = Document(str(path))
+    paragraph_blocks, table_blocks = _extract_block_indices(doc)
+    paragraphs = _extract_paragraphs(doc, paragraph_blocks)
     return InspectResult(
         path=str(path),
         sections=_extract_sections(doc),
         styles=_extract_styles(doc),
-        paragraphs=_extract_paragraphs(doc),
-        tables=_extract_tables(doc),
+        paragraphs=paragraphs,
+        tables=_extract_tables(doc, table_blocks),
         non_black_runs=_extract_non_black_runs(path),
+        toc_dot_leader_count=_extract_toc_dot_leader_count_from_xml(path),
     )

@@ -1,8 +1,8 @@
-"""Generate Liu Gaopeng thesis v014 with cover-template normalization.
+"""Generate the next Liu Gaopeng thesis delivery with format normalization.
 
-Input is the last structurally safe delivery candidate, v013. This script keeps
-the document content chain intact, then fixes visual inconsistencies that the
-school-rule checker does not fully cover:
+Input is the latest versioned delivery in Downloads. This script keeps the
+document content chain intact, writes the next vNNN DOCX, then fixes visual
+inconsistencies that the school-rule checker does not fully cover:
 
 - first-page cover style copied from the school literature-review template
 - style-level colors such as Hyperlink and Pandoc token styles
@@ -30,14 +30,39 @@ from lxml import etree
 
 ROOT = Path(__file__).resolve().parents[1]
 DOWNLOADS = Path(r"C:/Users/ASUS-KL/Downloads")
+DOCX_STEM = "202213210刘高朋修改迭代版"
+OUTPUT_LABEL = "格式规范迭代版"
+VERSIONED_DOCX_RE = re.compile(rf"^{re.escape(DOCX_STEM)}_v(\d{{3}})_(.+)\.docx$")
 ORIGINAL = DOWNLOADS / "202213210刘高朋修改迭代版.docx"
-SRC = DOWNLOADS / "202213210刘高朋修改迭代版_v013_阅读节奏优化版.docx"
-OUT = DOWNLOADS / "202213210刘高朋修改迭代版_v014_封面模板修正版.docx"
+
+
+def versioned_docx_candidates() -> list[tuple[int, str, Path]]:
+    candidates: list[tuple[int, str, Path]] = []
+    for path in DOWNLOADS.glob(f"{DOCX_STEM}_v*.docx"):
+        match = VERSIONED_DOCX_RE.match(path.name)
+        if not match:
+            continue
+        candidates.append((int(match.group(1)), match.group(2), path))
+    return sorted(candidates, key=lambda item: item[0])
+
+
+def latest_source_docx() -> tuple[int, str, Path]:
+    candidates = versioned_docx_candidates()
+    if candidates:
+        return candidates[-1]
+    if ORIGINAL.exists():
+        return -1, "原始文件", ORIGINAL
+    raise FileNotFoundError(f"no source DOCX found in {DOWNLOADS}")
+
+
+SRC_VERSION, SRC_LABEL, SRC = latest_source_docx()
+OUT_VERSION = SRC_VERSION + 1
+OUT = DOWNLOADS / f"{DOCX_STEM}_v{OUT_VERSION:03d}_{OUTPUT_LABEL}.docx"
 PDF = OUT.with_suffix(".pdf")
-REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v014_格式检测报告.md"
-BLANK_REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v014_留白扫描.json"
-PAGE_DIR = DOWNLOADS / "202213210刘高朋修改迭代版_v014_pdf_pages"
-VERSION_LOG = DOWNLOADS / "202213210刘高朋修改迭代版_版本记录.md"
+REPORT = DOWNLOADS / f"{DOCX_STEM}_v{OUT_VERSION:03d}_格式检测报告.md"
+BLANK_REPORT = DOWNLOADS / f"{DOCX_STEM}_v{OUT_VERSION:03d}_留白扫描.json"
+PAGE_DIR = DOWNLOADS / f"{DOCX_STEM}_v{OUT_VERSION:03d}_pdf_pages"
+VERSION_LOG = DOWNLOADS / f"{DOCX_STEM}_版本记录.md"
 EXPECTED_HEADER = "华北水利水电大学毕业设计"
 COVER_TEMPLATE = DOWNLOADS / "202213210刘高朋_文献综述_标准模板版.docx"
 COVER_TITLE = "毕业设计（论文）"
@@ -568,10 +593,13 @@ def verify_delivery_contract() -> None:
     missing = [str(path) for path in required if not path.exists()]
     if missing:
         raise RuntimeError(f"missing delivery artifacts: {missing}")
-    if OUT.suffix.lower() != ".docx" or "_v014_" not in OUT.name:
+    expected_version_token = f"_v{OUT_VERSION:03d}_"
+    if OUT.suffix.lower() != ".docx" or expected_version_token not in OUT.name:
         raise RuntimeError(f"final output is not the expected versioned DOCX: {OUT}")
     if ORIGINAL.name == OUT.name:
         raise RuntimeError("final output overwrote the original filename")
+    if SRC_VERSION >= 0 and OUT_VERSION != SRC_VERSION + 1:
+        raise RuntimeError(f"output version did not increment: source=v{SRC_VERSION:03d}, output=v{OUT_VERSION:03d}")
 
 
 def run_size_pt(run) -> float | None:
@@ -753,27 +781,29 @@ def verify_visual_audit(audit: dict) -> None:
 
 
 def update_version_log(blank_suspects: list[dict], audit: dict) -> None:
+    source_label = f"v{SRC_VERSION:03d} - {SRC_LABEL}" if SRC_VERSION >= 0 else SRC_LABEL
+    version_title = f"v{OUT_VERSION:03d} - {OUTPUT_LABEL}"
     entry = f"""
 
-## v014 - 封面模板修正版
+## {version_title}
 
 - 文件: `{OUT}`
 - PDF: `{PDF}`
 - 检测报告: `{REPORT}`
 - 留白扫描: `{BLANK_REPORT}`，可疑页 {len(blank_suspects)} 页
 - 处理内容:
-  - 基于 v013 继续迭代，不覆盖原始文件和上一版交付件。
+  - 基于 {source_label} 继续迭代，不覆盖原始文件和上一版交付件。
   - 恢复封面首页为学校文献综述模板的版式尺度。
   - 封面主标题固定为“毕业设计（论文）”，不保留“文献综述”，也不退回“毕 业 设 计”。
   - 将封面作为独立 front-matter 契约处理，避免被正文 12pt 全篇统一逻辑覆盖。
-  - 保持 v013 的阅读节奏补充段、页眉、字体、颜色、图片、表格和参考文献紧凑排版规则。
+  - 保持上一版的阅读节奏补充段、页眉、字体、颜色、图片、表格和参考文献紧凑排版规则。
 - 颜色审计: visible_runs={audit['visible_runs']}, non_black_runs={audit['non_black_runs']}, style_non_black={audit['style_non_black']}
 """
     if VERSION_LOG.exists():
         text = VERSION_LOG.read_text(encoding="utf-8")
     else:
         text = "# 202213210刘高朋修改迭代版 版本记录\n"
-    marker = "## v014 - 封面模板修正版"
+    marker = f"## {version_title}"
     start = text.find(marker)
     if start == -1:
         updated = text.rstrip() + entry + "\n"
