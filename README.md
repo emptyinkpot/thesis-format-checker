@@ -10,7 +10,23 @@ pip install -e .
 
 依赖 [pandoc](https://pandoc.org/) 用于内容提取（需确保 pandoc 在 PATH 中）。
 
-## 用法
+## 统一入口
+
+这个仓库只需要记两个入口：
+
+```powershell
+# 业务入口：基于 Downloads 里的最新版本自动生成下一版 DOCX/PDF/报告
+python "E:\My Project\thesis-format-checker\delivery\run_delivery.py"
+
+# 测试入口：真实调用业务入口生成下一版，然后跑完整验收
+python "E:\My Project\thesis-format-checker\tests\run_full_tests.py"
+```
+
+`delivery/run_delivery.py` 是业务 main；`tests/run_full_tests.py` 是测试 main。`src/`、`presets/` 是内部实现或规则数据，不作为日常启动入口。
+
+## 底层检测 CLI
+
+`thesis-check` 是格式检测器的底层 CLI，给业务入口和调试使用，不是论文迭代的主入口。
 
 ```bash
 # 校验（默认使用 ncwu preset）

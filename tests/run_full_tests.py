@@ -2,14 +2,14 @@
 
 Run from anywhere:
 
-    python E:/My Project/thesis-format-checker/scripts/run_full_tests.py
+    python E:/My Project/thesis-format-checker/tests/run_full_tests.py
 
 What it covers:
 - Python syntax/bytecode compilation
 - built-in unit contracts for rules and preset loading
 - DOCX mutation regressions proving key rules fail on real broken documents
-- latest DOCX regeneration through the canonical delivery builder
-- NCWU checker pass on the newly generated version
+- real delivery iteration through delivery/run_delivery.py
+- NCWU checker pass on the newly generated delivery version
 - first-page cover contract against the school literature-review template
 - color-consistency regression check against v011
 - latest visual audit and blank-scan sanity checks
@@ -90,8 +90,8 @@ class StepResult:
     detail: str = ""
 
 
-ACTIVE_SOURCE_DOCX: Path | None = None
 ACTIVE_DOCX: Path | None = None
+ACTIVE_SOURCE_DOCX: Path | None = None
 ACTIVE_PDF: Path | None = None
 ACTIVE_REPORT: Path | None = None
 ACTIVE_BLANK_REPORT: Path | None = None
@@ -133,21 +133,21 @@ def set_active_delivery(source_docx: Path, output_docx: Path) -> None:
     ACTIVE_PDF, ACTIVE_REPORT, ACTIVE_BLANK_REPORT = related_delivery_paths(output_docx)
 
 
-def require_active_docx() -> Path:
-    if ACTIVE_DOCX is None:
-        raise RuntimeError("active delivery DOCX is not set; regenerate step must run first")
-    return ACTIVE_DOCX
-
-
 def require_active_source_docx() -> Path:
     if ACTIVE_SOURCE_DOCX is None:
-        raise RuntimeError("active source DOCX is not set; regenerate step must run first")
+        raise RuntimeError("active source DOCX is not set; regenerate-latest step must run first")
     return ACTIVE_SOURCE_DOCX
+
+
+def require_active_docx() -> Path:
+    if ACTIVE_DOCX is None:
+        raise RuntimeError("active delivery DOCX is not set; regenerate-latest step must run first")
+    return ACTIVE_DOCX
 
 
 def require_active_related_paths() -> tuple[Path, Path, Path]:
     if ACTIVE_PDF is None or ACTIVE_REPORT is None or ACTIVE_BLANK_REPORT is None:
-        raise RuntimeError("active delivery related paths are not set; regenerate step must run first")
+        raise RuntimeError("active delivery related paths are not set; select-latest-delivery step must run first")
     return ACTIVE_PDF, ACTIVE_REPORT, ACTIVE_BLANK_REPORT
 
 
@@ -351,7 +351,8 @@ def step_compileall() -> str:
         "compileall",
         str(ROOT / "src" / "thesis_format_checker"),
         str(ROOT / "delivery" / "build_lgp_docx.py"),
-        str(ROOT / "scripts" / "run_full_tests.py"),
+        str(ROOT / "delivery" / "run_delivery.py"),
+        str(ROOT / "tests" / "run_full_tests.py"),
     ])
     return "compileall passed"
 
@@ -436,12 +437,12 @@ def step_regenerate_latest() -> str:
         raise RuntimeError(f"no versioned source DOCX found in {DOWNLOADS}")
     source_version, _source_label, source_docx = before[-1]
 
-    from delivery import build_lgp_docx
+    from delivery import run_delivery
 
     output = io.StringIO()
     try:
         with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
-            build_lgp_docx.main()
+            run_delivery.main()
     except Exception:
         print(output.getvalue())
         raise
