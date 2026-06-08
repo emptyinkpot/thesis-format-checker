@@ -77,34 +77,34 @@ ENGINEERING_MIN_IMAGE_HEIGHT_EMU = 1_800_000
 KICAD_FULL_SCHEMATIC_SOURCE = ENGINEERING_PAPER_READY_ROOT / "figure_04_kicad_component_schematic.png"
 KICAD_LOCAL_FIGURES = [
     (
-        "图3.5（a） 电源输入与3.3V稳压局部截图",
-        ENGINEERING_PAPER_READY_ROOT / "figure_04a_kicad_power_regulator_crop.png",
-        5.1,
+        "图3.5（a） 电源输入与3.3V稳压实物-原理对应图",
+        ENGINEERING_PAPER_READY_ROOT / "figure_04a_power_evidence_pair.png",
+        5.8,
     ),
     (
-        "图3.5（b） I2C传感器与OLED接口局部截图",
-        ENGINEERING_PAPER_READY_ROOT / "figure_04c_kicad_i2c_sensor_display_crop.png",
-        5.2,
+        "图3.5（b） I2C传感器与OLED接口实物-原理对应图",
+        ENGINEERING_PAPER_READY_ROOT / "figure_04b_i2c_evidence_pair.png",
+        5.8,
     ),
     (
-        "图3.5（c） STM32主控最小系统局部截图",
-        ENGINEERING_PAPER_READY_ROOT / "figure_04b_kicad_mcu_minimum_crop.png",
-        3.2,
+        "图3.5（c） STM32主控最小系统实物-原理对应图",
+        ENGINEERING_PAPER_READY_ROOT / "figure_04c_mcu_evidence_pair.png",
+        5.8,
     ),
     (
-        "图3.5（d） ESP8266无线通信接口局部截图",
-        ENGINEERING_PAPER_READY_ROOT / "figure_04d_kicad_esp8266_crop.png",
-        4.6,
+        "图3.5（d） ESP8266无线通信接口实物-原理对应图",
+        ENGINEERING_PAPER_READY_ROOT / "figure_04d_esp8266_evidence_pair.png",
+        5.8,
     ),
     (
-        "图3.5（e） LED与蜂鸣器报警输出局部截图",
-        ENGINEERING_PAPER_READY_ROOT / "figure_04e_kicad_alarm_output_crop.png",
-        4.4,
+        "图3.5（e） LED与蜂鸣器报警输出实物-原理对应图",
+        ENGINEERING_PAPER_READY_ROOT / "figure_04e_alarm_evidence_pair.png",
+        5.8,
     ),
     (
-        "图3.5（f） 调试、复位、时钟与ADC局部截图",
-        ENGINEERING_PAPER_READY_ROOT / "figure_04f_kicad_debug_reset_clock_adc_crop.png",
-        5.5,
+        "图3.5（f） 调试、复位、时钟与ADC实物-原理对应图",
+        ENGINEERING_PAPER_READY_ROOT / "figure_04f_debug_evidence_pair.png",
+        5.8,
     ),
 ]
 KICAD_LOCAL_FIGURE_BY_CAPTION = {
@@ -116,6 +116,12 @@ KICAD_STALE_CAPTIONS = {
     "图3.5 PCB连线与元件布局图",
     "图3.5 KiCad元器件连线原理图",
     "图3.5 KiCad局部电路截图组",
+    "图3.5（a） 电源输入与3.3V稳压局部截图",
+    "图3.5（b） I2C传感器与OLED接口局部截图",
+    "图3.5（c） STM32主控最小系统局部截图",
+    "图3.5（d） ESP8266无线通信接口局部截图",
+    "图3.5（e） LED与蜂鸣器报警输出局部截图",
+    "图3.5（f） 调试、复位、时钟与ADC局部截图",
     *(caption for caption, _source, _width in KICAD_LOCAL_FIGURES),
 }
 KICAD_LOCAL_FIGURE_INSERTIONS = [
@@ -123,8 +129,8 @@ KICAD_LOCAL_FIGURE_INSERTIONS = [
         "电源系统调试阶段常见问题包括OLED刷新正常但传感器读数波动",
         [
             (
-                "图3.5（a） 电源输入与3.3V稳压局部截图",
-                "图3.5（a）把5V输入、AMS1117-3.3稳压器和10μF/100nF去耦电容放在同一局部中，便于说明3.3V电源怎样先稳定再分配给主控、传感器、显示屏和无线通信模块。",
+                "图3.5（a） 电源输入与3.3V稳压实物-原理对应图",
+                "图3.5（a）左侧显示板上电源输入、稳压器和去耦电容的装配位置，右侧对应5V输入、AMS1117-3.3以及10μF/100nF电容的原理连接，说明3.3V电源先稳定再分配给主控、传感器、显示屏和无线通信模块。",
             ),
         ],
     ),
@@ -132,8 +138,8 @@ KICAD_LOCAL_FIGURE_INSERTIONS = [
         "供电设计采用5 V输入并经3.3 V稳压后提供给STM32、SCD41、OLED和ESP8266等模块",
         [
             (
-                "图3.5（b） I2C传感器与OLED接口局部截图",
-                "图3.5（b）对应SCD41与OLED的I2C接口分组，图中上拉电阻、SCD41四针接口和SSD1306 OLED接口共同说明采集总线与显示总线的硬件边界。",
+                "图3.5（b） I2C传感器与OLED接口实物-原理对应图",
+                "图3.5（b）左侧显示SCD41与OLED模块在板上的接口位置，右侧对应I2C上拉电阻、SCD41四针接口和SSD1306 OLED接口，说明采集总线与显示总线的硬件边界。",
             ),
         ],
     ),
@@ -141,20 +147,20 @@ KICAD_LOCAL_FIGURE_INSERTIONS = [
         "本设计以调试稳定和接口清晰为首要目标进行资源分配",
         [
             (
-                "图3.5（c） STM32主控最小系统局部截图",
-                "图3.5（c）集中展示STM32F103C8T6主控引脚，能够直接对应PB10/PB11采集、PB6/PB7显示、PA9/PA10通信以及PA1/PB4报警输出等资源分配。",
+                "图3.5（c） STM32主控最小系统实物-原理对应图",
+                "图3.5（c）左侧定位STM32主控及其周边走线，右侧集中展示STM32F103C8T6主控引脚，能够对应PB10/PB11采集、PB6/PB7显示、PA9/PA10通信以及PA1/PB4报警输出等资源分配。",
             ),
             (
-                "图3.5（d） ESP8266无线通信接口局部截图",
-                "图3.5（d）单独裁出ESP8266-01S接口，重点显示TXD、RXD、RST、CH_PD/EN和3.3V供电端，便于说明无线模块与STM32串口及复位控制的连接关系。",
+                "图3.5（d） ESP8266无线通信接口实物-原理对应图",
+                "图3.5（d）左侧定位ESP8266无线模块及相邻供电电容，右侧对应TXD、RXD、RST、CH_PD/EN和3.3V供电端，说明无线模块与STM32串口及复位控制的连接关系。",
             ),
             (
-                "图3.5（e） LED与蜂鸣器报警输出局部截图",
-                "图3.5（e）对应声光报警输出，LED限流电阻、报警LED、有源蜂鸣器和三极管驱动关系能够说明PA1/PB4输出不是简单并联负载，而是分级提示链路的一部分。",
+                "图3.5（e） LED与蜂鸣器报警输出实物-原理对应图",
+                "图3.5（e）左侧显示蜂鸣器、报警LED和驱动元件在板上的相对位置，右侧对应LED限流电阻、有源蜂鸣器和三极管驱动关系，说明PA1/PB4输出不是简单并联负载，而是分级提示链路的一部分。",
             ),
             (
-                "图3.5（f） 调试、复位、时钟与ADC局部截图",
-                "图3.5（f）补充SWD下载接口、复位按键、8MHz晶振和预留ADC调试端，说明硬件调试入口与主控稳定运行条件如何一起支撑后续固件烧录和联调。",
+                "图3.5（f） 调试、复位、时钟与ADC实物-原理对应图",
+                "图3.5（f）左侧显示SWD、USART调试接口和ADC预留端在板上的位置，右侧对应复位按键、8MHz晶振、SWD下载口和ADC调试端，说明硬件调试入口与主控稳定运行条件如何支撑后续固件烧录和联调。",
             ),
         ],
     ),
@@ -163,6 +169,14 @@ KICAD_LOCAL_EXPLANATIONS = {
     explanation
     for _anchor, items in KICAD_LOCAL_FIGURE_INSERTIONS
     for _caption, explanation in items
+}
+KICAD_STALE_EXPLANATIONS = {
+    "图3.5（a）把5V输入、AMS1117-3.3稳压器和10μF/100nF去耦电容放在同一局部中，便于说明3.3V电源怎样先稳定再分配给主控、传感器、显示屏和无线通信模块。",
+    "图3.5（b）对应SCD41与OLED的I2C接口分组，图中上拉电阻、SCD41四针接口和SSD1306 OLED接口共同说明采集总线与显示总线的硬件边界。",
+    "图3.5（c）集中展示STM32F103C8T6主控引脚，能够直接对应PB10/PB11采集、PB6/PB7显示、PA9/PA10通信以及PA1/PB4报警输出等资源分配。",
+    "图3.5（d）单独裁出ESP8266-01S接口，重点显示TXD、RXD、RST、CH_PD/EN和3.3V供电端，便于说明无线模块与STM32串口及复位控制的连接关系。",
+    "图3.5（e）对应声光报警输出，LED限流电阻、报警LED、有源蜂鸣器和三极管驱动关系能够说明PA1/PB4输出不是简单并联负载，而是分级提示链路的一部分。",
+    "图3.5（f）补充SWD下载接口、复位按键、8MHz晶振和预留ADC调试端，说明硬件调试入口与主控稳定运行条件如何一起支撑后续固件烧录和联调。",
 }
 REPLACE_EXISTING_ENGINEERING_FIGURES = {
     caption: source
@@ -182,11 +196,11 @@ ENGINEERING_CAPTION_RENAMES = {
     "图3.3 传感、显示与通信接口分配图": "图3.3 STM32主控接口原理图",
     "图3.3 STM32主控接口分配图": "图3.3 STM32主控接口原理图",
     "图3.4 STM32主控引脚分配图": "图3.4 PCB顶层布线检查图",
-    "图3.5 供电稳压与调试检查路径图": "图3.5（a） 电源输入与3.3V稳压局部截图",
-    "图3.5 PCB三维装配与模块位置图": "图3.5（a） 电源输入与3.3V稳压局部截图",
-    "图3.5 PCB连线与元件布局图": "图3.5（a） 电源输入与3.3V稳压局部截图",
-    "图3.5 KiCad元器件连线原理图": "图3.5（a） 电源输入与3.3V稳压局部截图",
-    "图3.5 KiCad局部电路截图组": "图3.5（a） 电源输入与3.3V稳压局部截图",
+    "图3.5 供电稳压与调试检查路径图": "图3.5（a） 电源输入与3.3V稳压实物-原理对应图",
+    "图3.5 PCB三维装配与模块位置图": "图3.5（a） 电源输入与3.3V稳压实物-原理对应图",
+    "图3.5 PCB连线与元件布局图": "图3.5（a） 电源输入与3.3V稳压实物-原理对应图",
+    "图3.5 KiCad元器件连线原理图": "图3.5（a） 电源输入与3.3V稳压实物-原理对应图",
+    "图3.5 KiCad局部电路截图组": "图3.5（a） 电源输入与3.3V稳压实物-原理对应图",
 }
 TEXT_REPLACEMENTS = {
     "主控侧资源分配见图3.4和表3.1。": "主控侧资源分配见表3.1，PCB布线检查见图3.4，KiCad局部电路截图见图3.5（a）至图3.5（f）。",
@@ -238,7 +252,7 @@ FORBIDDEN_TERMS = [
     "本文按照",
 ]
 
-ALLOWED_BLANK_PAGES = {2, 3, 23, 37, 56, 57, 73, 80}
+ALLOWED_BLANK_PAGES = {2, 3, 23, 36, 55, 56, 72, 79}
 ALLOWED_EAST_ASIA_FONTS = {"宋体", "黑体", "楷体", "仿宋_GB2312", "隶书", "Consolas"}
 ALLOWED_LATIN_FONTS = {"Times New Roman", "Consolas", "宋体"}
 
@@ -561,7 +575,7 @@ def remove_stale_kicad_figure_blocks(doc: Document) -> None:
     paragraphs = list(doc.paragraphs)
     for index, paragraph in enumerate(paragraphs):
         text = paragraph.text.strip()
-        if text in KICAD_LOCAL_EXPLANATIONS:
+        if text in KICAD_LOCAL_EXPLANATIONS or text in KICAD_STALE_EXPLANATIONS:
             _remove_paragraph(paragraph)
             continue
         if text not in KICAD_STALE_CAPTIONS:

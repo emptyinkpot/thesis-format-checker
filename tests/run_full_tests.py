@@ -79,7 +79,7 @@ FORBIDDEN_TERMS = [
     "本文按照",
 ]
 
-ALLOWED_BLANK_PAGES = {2, 3, 23, 37, 56, 57, 73, 80}
+ALLOWED_BLANK_PAGES = {2, 3, 23, 36, 55, 56, 72, 79}
 ALLOWED_EAST_ASIA_FONTS = {"宋体", "黑体", "楷体", "仿宋_GB2312", "隶书", "Consolas"}
 ALLOWED_LATIN_FONTS = {"Times New Roman", "Consolas", "宋体"}
 
@@ -98,12 +98,12 @@ ENGINEERING_PAPER_READY_ROOT = Path(
 ENGINEERING_MIN_IMAGE_HEIGHT_EMU = 1_800_000
 KICAD_FULL_SCHEMATIC_SOURCE = ENGINEERING_PAPER_READY_ROOT / "figure_04_kicad_component_schematic.png"
 KICAD_LOCAL_FIGURES = {
-    "图3.5（a） 电源输入与3.3V稳压局部截图": ENGINEERING_PAPER_READY_ROOT / "figure_04a_kicad_power_regulator_crop.png",
-    "图3.5（b） I2C传感器与OLED接口局部截图": ENGINEERING_PAPER_READY_ROOT / "figure_04c_kicad_i2c_sensor_display_crop.png",
-    "图3.5（c） STM32主控最小系统局部截图": ENGINEERING_PAPER_READY_ROOT / "figure_04b_kicad_mcu_minimum_crop.png",
-    "图3.5（d） ESP8266无线通信接口局部截图": ENGINEERING_PAPER_READY_ROOT / "figure_04d_kicad_esp8266_crop.png",
-    "图3.5（e） LED与蜂鸣器报警输出局部截图": ENGINEERING_PAPER_READY_ROOT / "figure_04e_kicad_alarm_output_crop.png",
-    "图3.5（f） 调试、复位、时钟与ADC局部截图": ENGINEERING_PAPER_READY_ROOT / "figure_04f_kicad_debug_reset_clock_adc_crop.png",
+    "图3.5（a） 电源输入与3.3V稳压实物-原理对应图": ENGINEERING_PAPER_READY_ROOT / "figure_04a_power_evidence_pair.png",
+    "图3.5（b） I2C传感器与OLED接口实物-原理对应图": ENGINEERING_PAPER_READY_ROOT / "figure_04b_i2c_evidence_pair.png",
+    "图3.5（c） STM32主控最小系统实物-原理对应图": ENGINEERING_PAPER_READY_ROOT / "figure_04c_mcu_evidence_pair.png",
+    "图3.5（d） ESP8266无线通信接口实物-原理对应图": ENGINEERING_PAPER_READY_ROOT / "figure_04d_esp8266_evidence_pair.png",
+    "图3.5（e） LED与蜂鸣器报警输出实物-原理对应图": ENGINEERING_PAPER_READY_ROOT / "figure_04e_alarm_evidence_pair.png",
+    "图3.5（f） 调试、复位、时钟与ADC实物-原理对应图": ENGINEERING_PAPER_READY_ROOT / "figure_04f_debug_evidence_pair.png",
 }
 ENGINEERING_FIGURES = {
     "图3.2 系统原理图": ENGINEERING_PAPER_READY_ROOT / "figure_01_system_principle_schematic.png",
@@ -112,12 +112,12 @@ ENGINEERING_FIGURES = {
     **KICAD_LOCAL_FIGURES,
 }
 ENGINEERING_FIGURE_SOURCE_SHA256 = {
-    "图3.5（a） 电源输入与3.3V稳压局部截图": "839034f9ab7a66b397f3598615e6246cbc1eb8ca9391859f1012a7d8f3020138",
-    "图3.5（b） I2C传感器与OLED接口局部截图": "262f3210eae25ec1fe2e7594ee29e1170b3b2c067f1a98eba13761ce7840dcad",
-    "图3.5（c） STM32主控最小系统局部截图": "b7746d81923fffce0d8b48f532ddf42d794c6b16de7057a1837e92f919846831",
-    "图3.5（d） ESP8266无线通信接口局部截图": "04eaece422c8fe4c0e837bf19e6f37cad2bb8015843514851d570994d6bc2acc",
-    "图3.5（e） LED与蜂鸣器报警输出局部截图": "d245f42a48bd917e57a60795b600b5220b8c3a01c26b60a6185e521027d77d77",
-    "图3.5（f） 调试、复位、时钟与ADC局部截图": "7ea8ce2d3b9cdef3eb4e84081fd852f489e249696c8af77a624d9aad63c54bdf",
+    "图3.5（a） 电源输入与3.3V稳压实物-原理对应图": "48c93505dbbd8e4c627f6527fd9065e64756bdde7ec4f872d4e0820dc7a12d01",
+    "图3.5（b） I2C传感器与OLED接口实物-原理对应图": "513290b469667c4dd090cc8754db21b965eed944f6670cef8c2a3ab8567529e3",
+    "图3.5（c） STM32主控最小系统实物-原理对应图": "393e7aca5f9e1986054fd075d1124018fa722f318da11596611812da60de7e2d",
+    "图3.5（d） ESP8266无线通信接口实物-原理对应图": "d8a392154c17979747b0734ebd736406a17121a6a4f2000517f414bccf103d07",
+    "图3.5（e） LED与蜂鸣器报警输出实物-原理对应图": "bd707e18cc0f19b0801a1f5d4ca7659de1c01623c0933884808d8f3f5d03aa7d",
+    "图3.5（f） 调试、复位、时钟与ADC实物-原理对应图": "7b739893c54efa281f535105629e0cf4db1ca5c8e300b3edd128bd3c61e4c7ee",
 }
 KICAD_FULL_SCHEMATIC_SHA256 = "576705875f1b4ba154fe631efa70e3bcd7d63bab47786d69566e8ac860537526"
 
