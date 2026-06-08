@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "ruff>=0.1"]
+dev = ["ruff>=0.1"]
 
 [project.scripts]
 thesis-check = "thesis_format_checker.cli:main"

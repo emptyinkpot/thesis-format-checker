@@ -33,10 +33,6 @@ V012 = DOWNLOADS / "202213210刘高朋修改迭代版_v012_全篇黑色字体统
 V012_BLANK_REPORT = DOWNLOADS / "202213210刘高朋修改迭代版_v012_留白扫描.json"
 
 
-class SkipStep(RuntimeError):
-    pass
-
-
 @dataclass
 class StepResult:
     name: str
@@ -165,9 +161,6 @@ def run_step(name: str, fn) -> StepResult:
         detail = fn()
         print(f"PASS {detail}")
         return StepResult(name, "PASS", detail)
-    except SkipStep as exc:
-        print(f"SKIP {exc}")
-        return StepResult(name, "SKIP", str(exc))
     except Exception as exc:
         print(f"FAIL {exc}")
         return StepResult(name, "FAIL", str(exc))
